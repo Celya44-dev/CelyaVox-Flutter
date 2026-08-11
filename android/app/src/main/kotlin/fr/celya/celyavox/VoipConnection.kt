@@ -49,6 +49,9 @@ open class VoipConnection(
     override fun onAnswer() {
         stopRinging()
         startAudio()
+        // Synchronize with outgoing calls: refresh audio immediately like in VoipEngine.startCall()
+        // This ensures consistent microphone volume for incoming calls
+        PjsipEngine.instance.refreshAudio()
         setActive()
     }
 
