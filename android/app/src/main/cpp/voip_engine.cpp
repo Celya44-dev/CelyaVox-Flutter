@@ -260,7 +260,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRefreshAudio(JNIEnv *, jobject) {
     LOGI(">>> [REFRESH AUDIO] START");
     
     // Log current audio device info BEFORE
-    pjsua_aud_dev_info aud_info;
     pjmedia_aud_dev_index current_cap_dev, current_play_dev;
     pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE, &current_play_dev);
     pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE, &current_cap_dev);
