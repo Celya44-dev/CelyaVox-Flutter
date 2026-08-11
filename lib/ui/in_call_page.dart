@@ -140,8 +140,13 @@ class _InCallPageState extends State<InCallPage> {
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
             _activeCallId = event.callId;
-            _activeCallerId = event.callerId;
-            AppLogger.instance.log('>>> InCallPage.state updated: _activeCallerId=$_activeCallerId');
+            // Only update callerId if the event has one, preserve the initial value if empty
+            if (event.callerId.isNotEmpty) {
+              _activeCallerId = event.callerId;
+              AppLogger.instance.log('>>> InCallPage.state updated callerId: _activeCallerId=$_activeCallerId');
+            } else {
+              AppLogger.instance.log('>>> InCallPage.CallConnectedEvent has empty callerId, keeping initial: $_activeCallerId');
+            }
           });
         }
       } else if (event is OutgoingCallEvent) {

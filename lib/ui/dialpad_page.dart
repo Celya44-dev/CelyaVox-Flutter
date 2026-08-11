@@ -143,7 +143,7 @@ class _DialpadPageState extends State<DialpadPage> {
         });
       } else if (event is IncomingCallEvent) {
         if (!mounted) return;
-        AppLogger.instance.log('INCOMING_CALL_EVENT received: callId=${event.callId}, callerId=${event.callerId}');
+        AppLogger.instance.log('>>> INCOMING_CALL_EVENT received: callId=${event.callId}, callerId=\"${event.callerId}\" (isEmpty=${event.callerId.isEmpty})');
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => IncomingCallPage(

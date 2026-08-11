@@ -28,7 +28,7 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
   @override
   void initState() {
     super.initState();
-    AppLogger.instance.log('IncomingCallPage.initState: callId=${widget.callId}, callerId=${widget.callerId}');
+    AppLogger.instance.log('>>> IncomingCallPage.initState: callId=${widget.callId}, callerId=\"${widget.callerId}\" (isEmpty=${widget.callerId.isEmpty})');
     _startRinging();
     _loadSavedContact();
     _listenCallEvents();

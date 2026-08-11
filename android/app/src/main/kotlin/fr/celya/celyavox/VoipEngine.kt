@@ -483,6 +483,10 @@ class VoipEngine(
                     // Store CallerID for this call
                     callerIdMap[message] = callerId
                     Log.i(TAG, ">>> INCOMING_CALL: rawCallerInfo=\"$rawCallerInfo\", parsed callerId=\"$callerId\", callId=$message, map now: $callerIdMap")
+                    
+                    // Always notify Flutter about the incoming call
+                    incomingCall(message, callerId)
+                    
                     val ok = VoipConnectionService.startIncomingCall(ctx, message, callerId)
                     if (!ok) {
                         val now = System.currentTimeMillis()
@@ -558,6 +562,7 @@ class VoipEngine(
     }
 
     fun incomingCall(callId: String, callerId: String?) {
+        Log.i(TAG, ">>> incomingCall: sending to Flutter callId=$callId, callerId=\"$callerId\"")
         emit(
             mapOf(
                 "type" to "incoming_call",
