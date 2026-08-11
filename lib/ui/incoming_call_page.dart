@@ -102,6 +102,7 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
 
   Future<void> _accept() async {
     setState(() => _isProcessing = true);
+    AppLogger.instance.log('>>> IncomingCallPage._accept: callId=${widget.callId}, callerId=${widget.callerId}');
     try {
       final ok = await _ensureMicPermission();
       if (!ok) return;
