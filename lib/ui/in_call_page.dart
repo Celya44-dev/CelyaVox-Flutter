@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../contacts/saved_contacts_store.dart';
+import '../log/app_logger.dart';
 import '../voip/voip_engine.dart';
 import '../voip/voip_events.dart';
 import 'dialpad_page.dart';
