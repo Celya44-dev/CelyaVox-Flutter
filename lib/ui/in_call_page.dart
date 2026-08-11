@@ -9,10 +9,11 @@ import '../voip/voip_events.dart';
 import 'dialpad_page.dart';
 
 class InCallPage extends StatefulWidget {
-  const InCallPage({super.key, required this.engine, required this.callId});
+  const InCallPage({super.key, required this.engine, required this.callId, this.callerId = ''});
 
   final VoipEngine engine;
   final String callId;
+  final String callerId;
 
   @override
   State<InCallPage> createState() => _InCallPageState();
@@ -35,7 +36,7 @@ class _InCallPageState extends State<InCallPage> {
   void initState() {
     super.initState();
     _activeCallId = widget.callId;
-    _activeCallerId = '';
+    _activeCallerId = widget.callerId;
     _ensureMicPermission();
     _loadBluetoothAvailability();
     _loadSavedContact();
@@ -72,7 +73,7 @@ class _InCallPageState extends State<InCallPage> {
   }
 
   Future<void> _loadSavedContact() async {
-    final number = _displayNumber(widget.callId);
+    final number = _displayNumber(_activeCallerId.isNotEmpty ? _activeCallerId : widget.callId);
     if (number.isEmpty) return;
     try {
       final saved = await SavedContactsStore.load();

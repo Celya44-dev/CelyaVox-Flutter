@@ -92,7 +92,6 @@ open class VoipConnection(
         previousMode = audioManager.mode
         previousSpeakerphone = audioManager.isSpeakerphoneOn
         previousMicMute = audioManager.isMicrophoneMute
-        logAudioState("BEFORE startAudio()")
 
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isMicrophoneMute = false
