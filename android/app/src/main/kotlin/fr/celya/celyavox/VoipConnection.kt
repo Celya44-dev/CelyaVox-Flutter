@@ -46,6 +46,22 @@ open class VoipConnection(
         setInitializing()
     }
 
+    private fun logAudioState(label: String) {
+        Log.i(TAG, ">>> ============================================")
+        Log.i(TAG, ">>> AUDIO STATE: $label")
+        Log.i(TAG, ">>> ============================================")
+        Log.i(TAG, ">>> AudioManager.mode: ${audioManager.mode} (MODE_NORMAL=${AudioManager.MODE_NORMAL}, MODE_IN_COMMUNICATION=${AudioManager.MODE_IN_COMMUNICATION}, MODE_IN_CALL=${AudioManager.MODE_IN_CALL})")
+        Log.i(TAG, ">>> isSpeakerphoneOn: ${audioManager.isSpeakerphoneOn}")
+        Log.i(TAG, ">>> isMicrophoneMute: ${audioManager.isMicrophoneMute}")
+        Log.i(TAG, ">>> isBluetoothScoOn: ${audioManager.isBluetoothScoOn}")
+        Log.i(TAG, ">>> isBluetoothOn: ${audioManager.isBluetoothOn}")
+        Log.i(TAG, ">>> Volume STREAM_VOICE_CALL: ${audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}")
+        Log.i(TAG, ">>> Volume STREAM_MUSIC: ${audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
+        Log.i(TAG, ">>> RingerMode: ${audioManager.ringerMode} (SILENT=${AudioManager.RINGER_MODE_SILENT}, VIBRATE=${AudioManager.RINGER_MODE_VIBRATE}, NORMAL=${AudioManager.RINGER_MODE_NORMAL})")
+        Log.i(TAG, ">>> callId: $callId")
+        Log.i(TAG, ">>> ============================================")
+    }
+
     override fun onAnswer() {
         stopRinging()
         startAudio()
@@ -91,6 +107,10 @@ open class VoipConnection(
         previousSpeakerphone = audioManager.isSpeakerphoneOn
         previousMicMute = audioManager.isMicrophoneMute
 
+        // Log audio state BEFORE changes
+        Log.i(TAG, ">>> [INCOMING] CALL: startAudio() BEGIN")
+        logAudioState("BEFORE startAudio()")
+
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isMicrophoneMute = false
 
@@ -114,9 +134,16 @@ open class VoipConnection(
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
             )
         }
+
+        // Log audio state AFTER changes
+        logAudioState("AFTER startAudio()")
+        Log.i(TAG, ">>> [INCOMING] CALL: startAudio() END\n")
     }
 
     private fun stopAudio() {
+        Log.i(TAG, ">>> [INCOMING] CALL: stopAudio() BEGIN")
+        logAudioState("BEFORE stopAudio()")
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         } else {
@@ -131,6 +158,9 @@ open class VoipConnection(
         previousMode = null
         previousSpeakerphone = null
         previousMicMute = null
+
+        logAudioState("AFTER stopAudio()")
+        Log.i(TAG, ">>> [INCOMING] CALL: stopAudio() END\n")
     }
 
     fun markRinging() {

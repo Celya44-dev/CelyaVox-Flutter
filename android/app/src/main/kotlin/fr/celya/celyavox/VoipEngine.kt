@@ -140,6 +140,9 @@ class VoipEngine(
         val ctx = appContext ?: return
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         
+        Log.i(TAG, ">>> [OUTGOING] CALL: initCallAudio() BEGIN")
+        logAudioState(audioManager, "BEFORE initCallAudio()")
+        
         // Set audio mode to communication and unmute microphone
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isMicrophoneMute = false
@@ -164,18 +167,27 @@ class VoipEngine(
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
             )
         }
-        Log.i(TAG, "VoipEngine.initCallAudio() initialized audio for call")
+        
+        logAudioState(audioManager, "AFTER initCallAudio()")
+        Log.i(TAG, ">>> [OUTGOING] CALL: initCallAudio() END\n")
     }
 
     fun setSpeakerphone(enabled: Boolean) {
         val ctx = appContext ?: return
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        
+        Log.i(TAG, ">>> setSpeakerphone($enabled) BEGIN")
+        logAudioState(audioManager, "BEFORE setSpeakerphone($enabled)")
+        
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         audioManager.isSpeakerphoneOn = enabled
         if (enabled && audioManager.isBluetoothScoOn) {
             audioManager.stopBluetoothSco()
             audioManager.isBluetoothScoOn = false
         }
+        
+        logAudioState(audioManager, "AFTER setSpeakerphone($enabled)")
+        Log.i(TAG, ">>> setSpeakerphone($enabled) END\n")
     }
 
     fun setBluetooth(enabled: Boolean) {
@@ -195,7 +207,27 @@ class VoipEngine(
     fun setMuted(enabled: Boolean) {
         val ctx = appContext ?: return
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        
+        Log.i(TAG, ">>> setMuted($enabled) BEGIN")
+        logAudioState(audioManager, "BEFORE setMuted($enabled)")
         audioManager.isMicrophoneMute = enabled
+        logAudioState(audioManager, "AFTER setMuted($enabled)")
+        Log.i(TAG, ">>> setMuted($enabled) END\n")
+    }
+
+    private fun logAudioState(audioManager: AudioManager, label: String) {
+        Log.i(TAG, ">>> ============================================")
+        Log.i(TAG, ">>> AUDIO STATE: $label")
+        Log.i(TAG, ">>> ============================================")
+        Log.i(TAG, ">>> AudioManager.mode: ${audioManager.mode} (MODE_NORMAL=${AudioManager.MODE_NORMAL}, MODE_IN_COMMUNICATION=${AudioManager.MODE_IN_COMMUNICATION}, MODE_IN_CALL=${AudioManager.MODE_IN_CALL})")
+        Log.i(TAG, ">>> isSpeakerphoneOn: ${audioManager.isSpeakerphoneOn}")
+        Log.i(TAG, ">>> isMicrophoneMute: ${audioManager.isMicrophoneMute}")
+        Log.i(TAG, ">>> isBluetoothScoOn: ${audioManager.isBluetoothScoOn}")
+        Log.i(TAG, ">>> isBluetoothOn: ${audioManager.isBluetoothOn}")
+        Log.i(TAG, ">>> Volume STREAM_VOICE_CALL: ${audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}")
+        Log.i(TAG, ">>> Volume STREAM_MUSIC: ${audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
+        Log.i(TAG, ">>> RingerMode: ${audioManager.ringerMode} (SILENT=${AudioManager.RINGER_MODE_SILENT}, VIBRATE=${AudioManager.RINGER_MODE_VIBRATE}, NORMAL=${AudioManager.RINGER_MODE_NORMAL})")
+        Log.i(TAG, ">>> ============================================")
     }
 
     fun isBluetoothAvailable(): Boolean {

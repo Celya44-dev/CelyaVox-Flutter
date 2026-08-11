@@ -76,6 +76,14 @@ static void emit_event(const char *type, const char *message) {
 static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id, pjsip_rx_data *rdata) {
     (void)acc_id;
     (void)rdata;
+    
+    LOGI(">>> [INCOMING] PJSIP EVENT: on_incoming_call START call_id=%d", call_id);
+    
+    pjsua_call_info ci;
+    if (pjsua_call_get_info(call_id, &ci) == PJ_SUCCESS) {
+        LOGI(">>> Incoming call state=%d, media_cnt=%u", ci.state, ci.media_cnt);
+    }
+    
     char buf[32];
     pj_ansi_snprintf(buf, sizeof(buf), "%d", call_id);
     emit_event("incoming_call", buf);
@@ -83,43 +91,63 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id, pjsip_r
     pjsua_call_setting_default(&opt);
     opt.aud_cnt = 1;
     opt.vid_cnt = 0;
-    pjsua_call_answer(call_id, 180, nullptr, nullptr);
+    
+    pj_status_t status = pjsua_call_answer(call_id, 180, nullptr, nullptr);
+    LOGI(">>> Sent 180 Ringing, status=%d\n", status);
 }
 
 static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     (void)e;
     pjsua_call_info ci;
     if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) return;
+    
+    LOGI("=== on_call_state call_id=%d, state=%d ===", call_id, ci.state);
+    
     if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
+        LOGI("Call CONFIRMED - call_id=%d, media_cnt=%u", call_id, ci.media_cnt);
         emit_event("call_connected", std::to_string(call_id).c_str());
     } else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
+        LOGI("Call DISCONNECTED - call_id=%d, status=%d", call_id, ci.last_status);
         std::string reason;
         reason += std::to_string(ci.last_status);
         reason += " ";
         reason += std::string(ci.last_status_text.ptr ? ci.last_status_text.ptr : "");
         std::string payload = std::to_string(call_id) + "|" + reason;
         emit_event("call_ended", payload.c_str());
+    } else {
+        LOGI("Call state change - call_id=%d, state=%d (not CONFIRMED/DISCONNECTED)", call_id, ci.state);
     }
 }
 
 static void on_call_media_state(pjsua_call_id call_id) {
     pjsua_call_info ci;
     if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) return;
+    
+    LOGI(">>> [PJSIP] on_call_media_state START call_id=%d", call_id);
+    LOGI(">>> [PJSIP] Call state: %d, media_cnt: %u", ci.state, ci.media_cnt);
+    
     for (unsigned i = 0; i < ci.media_cnt; ++i) {
         if (ci.media[i].type == PJMEDIA_TYPE_AUDIO) {
+            LOGI(">>> [PJSIP] Media %u: type=AUDIO, status=%d", i, ci.media[i].status);
+            
             if (ci.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
                 // Connect call audio to sound device (playback + capture).
                 const pjsua_conf_port_id slot = ci.media[i].stream.aud.conf_slot;
-                pjsua_conf_connect(slot, 0);
-                pjsua_conf_connect(0, slot);
-                LOGI("Media active on call %d, connected to sound device", call_id);
+                LOGI(">>> [PJSIP] Connecting media: slot=%d to device (0)", slot);
+                
+                pj_status_t conn1 = pjsua_conf_connect(slot, 0);
+                pj_status_t conn2 = pjsua_conf_connect(0, slot);
+                
+                LOGI(">>> [PJSIP] Connection results: slot->device=%d, device->slot=%d", conn1, conn2);
+                LOGI(">>> [PJSIP] Media ACTIVE on call %d, connected to sound device", call_id);
             } else if (ci.media[i].status == PJSUA_CALL_MEDIA_ERROR) {
-                LOGE("Media error on call %d", call_id);
+                LOGE(">>> [PJSIP] Media ERROR on call %d", call_id);
             } else {
-                LOGI("Media status on call %d: %d", call_id, ci.media[i].status);
+                LOGI(">>> [PJSIP] Media status on call %d: %d (not active yet)", call_id, ci.media[i].status);
             }
         }
     }
+    LOGI(">>> [PJSIP] on_call_media_state END\n");
 }
 
 static void on_reg_state(pjsua_acc_id acc_id) {
@@ -228,19 +256,39 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRefreshAudio(JNIEnv *, jobject) {
     ensure_pj_thread_registered("jni");
     if (!ensure_endpoint()) return JNI_FALSE;
     std::lock_guard<std::mutex> lock(g_mutex);
+    
+    LOGI(">>> [REFRESH AUDIO] START");
+    
+    // Log current audio device info BEFORE
+    pjsua_aud_dev_info aud_info;
+    pjmedia_aud_dev_index current_cap_dev, current_play_dev;
+    pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE, &current_play_dev);
+    pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE, &current_cap_dev);
+    LOGI(">>> [REFRESH AUDIO] Devices BEFORE: capture=%d, playback=%d", current_cap_dev, current_play_dev);
+    
     pj_status_t status = pjsua_set_snd_dev(PJMEDIA_AUD_DEFAULT_CAPTURE_DEV, PJMEDIA_AUD_DEFAULT_PLAYBACK_DEV);
+    
+    LOGI(">>> [REFRESH AUDIO] pjsua_set_snd_dev result: %d", status);
     if (status != PJ_SUCCESS) {
         char errbuf[128];
         pj_strerror(status, errbuf, sizeof(errbuf));
-        LOGE("refreshAudio set_snd_dev failed: %d (%s). Falling back to null sound device.", status, errbuf);
+        LOGE(">>> [REFRESH AUDIO] FAILED: %d (%s). Falling back to null sound device.", status, errbuf);
         pj_status_t null_status = pjsua_set_null_snd_dev();
         if (null_status != PJ_SUCCESS) {
             pj_strerror(null_status, errbuf, sizeof(errbuf));
-            LOGE("refreshAudio set_null_snd_dev failed: %d (%s)", null_status, errbuf);
+            LOGE(">>> [REFRESH AUDIO] set_null_snd_dev also failed: %d (%s)", null_status, errbuf);
+            LOGE(">>> [REFRESH AUDIO] END - FAILED\n");
             return JNI_FALSE;
         }
     }
+    
+    // Log current audio device info AFTER
+    pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE, &current_play_dev);
+    pjsua_snd_get_setting(PJMEDIA_AUD_DEV_CAP_INPUT_ROUTE, &current_cap_dev);
+    LOGI(">>> [REFRESH AUDIO] Devices AFTER: capture=%d, playback=%d", current_cap_dev, current_play_dev);
+    
     g_audio_ready = true;
+    LOGI(">>> [REFRESH AUDIO] END - SUCCESS\n");
     return JNI_TRUE;
 }
 
@@ -314,31 +362,50 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring jnumber) {
     ensure_pj_thread_registered("jni");
-    if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) return JNI_FALSE;
+    
+    LOGI(">>> [OUTGOING] CALL START: nativeMakeCall");
+    
+    if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) {
+        LOGE(">>> [OUTGOING] CALL: endpoint not ready or not registered");
+        return JNI_FALSE;
+    }
+    
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     std::string dest = "sip:" + std::string(number);
     pjsua_call_id call_id = PJSUA_INVALID_ID;
+    
+    LOGI(">>> [OUTGOING] CALL: Making call to: %s", dest.c_str());
+    
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {const_cast<char *>(dest.c_str()), static_cast<pj_ssize_t>(strlen(dest.c_str()))};
+    
+    LOGI(">>> [OUTGOING] CALL: Calling pjsua_call_make_call with account_id=%d", g_acc_id);
     pj_status_t status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
+    
+    LOGI(">>> [OUTGOING] CALL: pjsua_call_make_call returned: status=%d, call_id=%d", status, call_id);
+    
     if (status == PJMEDIA_EAUD_NODEFDEV) {
-        LOGE("make_call failed: %d (no audio device). Retrying with null sound device.", status);
+        LOGE(">>> [OUTGOING] CALL: Failed (no audio device). Retrying with null sound device.");
         pj_status_t null_status = pjsua_set_null_snd_dev();
         if (null_status == PJ_SUCCESS) {
             call_id = PJSUA_INVALID_ID;
             status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
+            LOGI(">>> [OUTGOING] CALL: Retry after set_null_snd_dev: status=%d, call_id=%d", status, call_id);
         }
     }
     env->ReleaseStringUTFChars(jnumber, number);
+    
     if (status != PJ_SUCCESS) {
         char errbuf[128];
         pj_strerror(status, errbuf, sizeof(errbuf));
-        LOGE("make_call failed: %d (%s)", status, errbuf);
+        LOGE(">>> [OUTGOING] CALL: FAILED: %d (%s)", status, errbuf);
         emit_event("call_error", errbuf);
+        LOGE(">>> [OUTGOING] CALL END - FAILED\n");
         return JNI_FALSE;
     }
-    LOGI("Calling %s (id=%d)", dest.c_str(), call_id);
+    LOGI(">>> [OUTGOING] CALL: SUCCESS - Calling %s (id=%d)", dest.c_str(), call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
+    LOGI(">>> [OUTGOING] CALL END - SUCCESS\n");
     return JNI_TRUE;
 }
 
@@ -348,11 +415,25 @@ Java_fr_celya_celyavox_PjsipEngine_nativeAcceptCall(JNIEnv *env, jobject, jstrin
     const char *cid = env->GetStringUTFChars(jcallId, nullptr);
     int call_id = atoi(cid);
     env->ReleaseStringUTFChars(jcallId, cid);
+    
+    LOGI(">>> [INCOMING] CALL: nativeAcceptCall START call_id=%d", call_id);
+    
+    pjsua_call_info ci;
+    if (pjsua_call_get_info(call_id, &ci) == PJ_SUCCESS) {
+        LOGI(">>> [INCOMING] CALL: Call state before answer: state=%d, media_cnt=%u", ci.state, ci.media_cnt);
+    }
+    
     pj_status_t status = pjsua_call_answer(call_id, 200, nullptr, nullptr);
+    
+    LOGI(">>> [INCOMING] CALL: pjsua_call_answer returned: status=%d", status);
+    
     if (status != PJ_SUCCESS) {
-        LOGE("accept call failed: %d", status);
+        LOGE(">>> [INCOMING] CALL: FAILED - status=%d", status);
+        LOGE(">>> [INCOMING] CALL END - FAILED\n");
         return JNI_FALSE;
     }
+    
+    LOGI(">>> [INCOMING] CALL END - SUCCESS\n");
     return JNI_TRUE;
 }
 
