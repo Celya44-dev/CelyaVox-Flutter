@@ -136,6 +136,7 @@ class _DialpadPageState extends State<DialpadPage> {
             builder: (_) => InCallPage(
               engine: widget.engine,
               callId: event.callId,
+              callerId: event.callerId,
             ),
           ),
         ).then((_) {
