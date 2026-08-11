@@ -127,9 +127,14 @@ class VoipEngine(
     }
 
     fun acceptCall(callId: String) {
-        Log.i(TAG, "VoipEngine.acceptCall callId=$callId")
+        Log.i(TAG, ">>> [INCOMING] CALL: VoipEngine.acceptCall() BEGIN callId=$callId")
+        // Initialize audio for incoming calls (same as for outgoing calls)
+        initCallAudio()
+        // Activate real audio devices in PJSIP
+        refreshAudio()
         val ok = sipEngine.acceptCall(callId)
         Log.i(TAG, "VoipEngine.acceptCall result callId=$callId ok=$ok")
+        Log.i(TAG, ">>> [INCOMING] CALL: VoipEngine.acceptCall() END\n")
     }
 
     fun refreshAudio(): Boolean {
