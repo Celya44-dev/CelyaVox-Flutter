@@ -223,7 +223,6 @@ class VoipEngine(
         Log.i(TAG, ">>> isSpeakerphoneOn: ${audioManager.isSpeakerphoneOn}")
         Log.i(TAG, ">>> isMicrophoneMute: ${audioManager.isMicrophoneMute}")
         Log.i(TAG, ">>> isBluetoothScoOn: ${audioManager.isBluetoothScoOn}")
-        Log.i(TAG, ">>> isBluetoothOn: ${audioManager.isBluetoothOn}")
         Log.i(TAG, ">>> Volume STREAM_VOICE_CALL: ${audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}")
         Log.i(TAG, ">>> Volume STREAM_MUSIC: ${audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
         Log.i(TAG, ">>> RingerMode: ${audioManager.ringerMode} (SILENT=${AudioManager.RINGER_MODE_SILENT}, VIBRATE=${AudioManager.RINGER_MODE_VIBRATE}, NORMAL=${AudioManager.RINGER_MODE_NORMAL})")
