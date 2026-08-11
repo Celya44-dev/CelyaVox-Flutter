@@ -46,20 +46,7 @@ open class VoipConnection(
         setInitializing()
     }
 
-    private fun logAudioState(label: String) {
-        Log.i("VoipConnection", ">>> ============================================")
-        Log.i("VoipConnection", ">>> AUDIO STATE: $label")
-        Log.i("VoipConnection", ">>> ============================================")
-        Log.i("VoipConnection", ">>> AudioManager.mode: ${audioManager.mode} (MODE_NORMAL=${AudioManager.MODE_NORMAL}, MODE_IN_COMMUNICATION=${AudioManager.MODE_IN_COMMUNICATION}, MODE_IN_CALL=${AudioManager.MODE_IN_CALL})")
-        Log.i("VoipConnection", ">>> isSpeakerphoneOn: ${audioManager.isSpeakerphoneOn}")
-        Log.i("VoipConnection", ">>> isMicrophoneMute: ${audioManager.isMicrophoneMute}")
-        Log.i("VoipConnection", ">>> isBluetoothScoOn: ${audioManager.isBluetoothScoOn}")
-        Log.i("VoipConnection", ">>> Volume STREAM_VOICE_CALL: ${audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}")
-        Log.i("VoipConnection", ">>> Volume STREAM_MUSIC: ${audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)} / Max: ${audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
-        Log.i("VoipConnection", ">>> RingerMode: ${audioManager.ringerMode} (SILENT=${AudioManager.RINGER_MODE_SILENT}, VIBRATE=${AudioManager.RINGER_MODE_VIBRATE}, NORMAL=${AudioManager.RINGER_MODE_NORMAL})")
-        Log.i("VoipConnection", ">>> callId: $callId")
-        Log.i("VoipConnection", ">>> ============================================")
-    }
+
 
     override fun onAnswer() {
         stopRinging()
@@ -105,9 +92,6 @@ open class VoipConnection(
         previousMode = audioManager.mode
         previousSpeakerphone = audioManager.isSpeakerphoneOn
         previousMicMute = audioManager.isMicrophoneMute
-
-        // Log audio state BEFORE changes
-        Log.i("VoipConnection", ">>> [INCOMING] CALL: startAudio() BEGIN")
         logAudioState("BEFORE startAudio()")
 
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -134,14 +118,9 @@ open class VoipConnection(
             )
         }
 
-        // Log audio state AFTER changes
-        logAudioState("AFTER startAudio()")
-        Log.i("VoipConnection", ">>> [INCOMING] CALL: startAudio() END\n")
     }
 
     private fun stopAudio() {
-        Log.i("VoipConnection", ">>> [INCOMING] CALL: stopAudio() BEGIN")
-        logAudioState("BEFORE stopAudio()")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
@@ -157,9 +136,6 @@ open class VoipConnection(
         previousMode = null
         previousSpeakerphone = null
         previousMicMute = null
-
-        logAudioState("AFTER stopAudio()")
-        Log.i("VoipConnection", ">>> [INCOMING] CALL: stopAudio() END\n")
     }
 
     fun markRinging() {

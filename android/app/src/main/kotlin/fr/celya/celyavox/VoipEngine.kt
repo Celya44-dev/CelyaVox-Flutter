@@ -91,6 +91,7 @@ class VoipEngine(
     }
 
     fun startCall(callee: String): Boolean {
+        Log.i(TAG, "VoipEngine.startCall callee=$callee")
         // Initialize audio for outgoing calls (similar to incoming calls in VoipConnection.startAudio())
         initCallAudio()
         // Activate real audio devices in PJSIP (was using null audio at app startup)
@@ -127,14 +128,13 @@ class VoipEngine(
     }
 
     fun acceptCall(callId: String) {
-        Log.i(TAG, ">>> [INCOMING] CALL: VoipEngine.acceptCall() BEGIN callId=$callId")
+        Log.i(TAG, "VoipEngine.acceptCall callId=$callId")
         // Initialize audio for incoming calls (same as for outgoing calls)
         initCallAudio()
         // Activate real audio devices in PJSIP
         refreshAudio()
         val ok = sipEngine.acceptCall(callId)
         Log.i(TAG, "VoipEngine.acceptCall result callId=$callId ok=$ok")
-        Log.i(TAG, ">>> [INCOMING] CALL: VoipEngine.acceptCall() END\n")
     }
 
     fun refreshAudio(): Boolean {
