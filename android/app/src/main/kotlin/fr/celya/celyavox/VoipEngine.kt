@@ -47,6 +47,7 @@ class VoipEngine(
     private var pendingFcmToken: String? = null
     private var pendingConnectedCallId: String? = null
     private var incomingRingtone: Ringtone? = null
+    private var outgoingRingbackTone: Ringtone? = null
     private var incomingVibrator: Vibrator? = null
     private var ringbackAudioTrack: AudioTrack? = null
     private var ringbackPlaybackThread: Thread? = null
@@ -498,7 +499,7 @@ class VoipEngine(
             
             // Generate 400 Hz sine wave
             for (i in 0 until toneSamples) {
-                val sample = (Short.MAX_VALUE * sin(2 * PI * frequency * i / sampleRate)).toShort()
+                val sample = ((Short.MAX_VALUE * sin(2 * PI * frequency * i / sampleRate)).toInt()).toShort()
                 toneBuffer[i] = sample
             }
             
