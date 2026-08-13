@@ -414,15 +414,15 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            // Use ToneGenerator to play a 400 Hz ringback tone (international standard)
+            // Use ToneGenerator to play DIAL tone for outgoing calls
             try {
                 val toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, ToneGenerator.MAX_VOLUME)
                 outgoingToneGenerator = toneGenerator
-                // Play 400 Hz for 1 second, then silence for 0.5 seconds (repeating pattern)
+                // Start playing dial tone (appropriate for outgoing call feedback)
                 mainHandler.post {
                     playRingbackTonePattern(toneGenerator)
                 }
-                Log.i(TAG, "Started outgoing ringback tone with 400 Hz pattern")
+                Log.i(TAG, "Started outgoing ringback tone using dial tone pattern")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to create ToneGenerator for ringback tone: ${e.message}", e)
                 // Fallback to regular ringtone if ToneGenerator fails
@@ -453,10 +453,10 @@ class VoipEngine(
     }
 
     private fun playRingbackTonePattern(toneGenerator: ToneGenerator) {
-        // Ringback tone pattern: 400 Hz, 1 second ON, 0.5 second OFF, repeat
+        // Ringback tone pattern using DIAL tone: 1 second ON, 0.5 second OFF, repeat
         val pattern = Runnable {
             try {
-                toneGenerator.startTone(ToneGenerator.TONE_CDMA_RINGBACK, 1000) // 1 second of 400Hz
+                toneGenerator.startTone(ToneGenerator.TONE_SUP_DIAL, 1000) // 1 second of dial tone
                 mainHandler.postDelayed({
                     // After 1 second, schedule next cycle
                     if (outgoingToneGenerator != null) {
