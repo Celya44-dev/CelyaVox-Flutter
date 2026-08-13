@@ -149,9 +149,9 @@ class VoipEngine(
         return sipEngine.refreshAudio()
     }
 
-    fun subscribePresence(contact: String) {
-        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact")
-        sipEngine.subscribePresence(contact)
+    fun subscribePresence(contact: String, prefix: String = "") {
+        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact, prefix=$prefix")
+        sipEngine.subscribePresence(contact, prefix)
         Log.i(TAG, ">>> VoipEngine.subscribePresence DONE for $contact")
     }
 
