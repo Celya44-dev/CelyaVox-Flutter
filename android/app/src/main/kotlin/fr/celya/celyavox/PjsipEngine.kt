@@ -189,6 +189,15 @@ class PjsipEngine private constructor() {
         return nativeGetPresenceStatus(contact)
     }
 
+    fun getContactForBuddy(buddyId: Int): String {
+        Log.i(TAG, ">>> PjsipEngine.getContactForBuddy: buddyId=$buddyId, initialized=${initialized.get()}")
+        if (!initialized.get()) {
+            Log.w(TAG, ">>> PjsipEngine.getContactForBuddy: engine not initialized")
+            return ""
+        }
+        return nativeGetContactForBuddy(buddyId)
+    }
+
     private external fun nativeInit(): Boolean
     private external fun nativeRegister(username: String, password: String, domain: String, proxy: String): Boolean
     private external fun nativeUnregister()
@@ -201,4 +210,5 @@ class PjsipEngine private constructor() {
     private external fun nativeSubscribePresence(contact: String, prefix: String): Boolean
     private external fun nativeUnsubscribePresence(contact: String): Boolean
     private external fun nativeGetPresenceStatus(contact: String): String
+    private external fun nativeGetContactForBuddy(buddyId: Int): String
 }

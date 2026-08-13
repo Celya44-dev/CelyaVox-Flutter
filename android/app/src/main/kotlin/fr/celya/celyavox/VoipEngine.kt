@@ -149,9 +149,9 @@ class VoipEngine(
         return sipEngine.refreshAudio()
     }
 
-    fun subscribePresence(contact: String, prefix: String = "") {
-        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact, prefix=$prefix")
-        sipEngine.subscribePresence(contact, prefix)
+    fun subscribePresence(contact: String) {
+        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact")
+        sipEngine.subscribePresence(contact)
         Log.i(TAG, ">>> VoipEngine.subscribePresence DONE for $contact")
     }
 
@@ -444,7 +444,7 @@ class VoipEngine(
                 ringbackPlaybackThread = Thread {
                     playRingbackToneSynthetic()
                 }.apply { start() }
-                Log.i(TAG, "Started outgoing ringback tone (400 Hz synthetic)")
+                Log.i(TAG, "Started outgoing ringback tone (440 Hz European pattern: 1.5s ON / 3.5s OFF)")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start ringback tone: ${e.message}", e)
                 ringbackShouldPlay = false
@@ -455,10 +455,10 @@ class VoipEngine(
     private fun playRingbackToneSynthetic() {
         try {
             val sampleRate = 44100 // Hz
-            val frequency = 400.0 // Hz (standard ringback tone)
-            val durationMs = 1000 // 1 second ON
-            val silenceDurationMs = 500 // 0.5 second OFF
-            val toneSamples = (sampleRate * durationMs / 1000).toInt()
+            val frequency = 440.0 // Hz (standard European ringback tone)
+            val toneDurationMs = 1500 // 1.5 seconds ON (European standard)
+            val silenceDurationMs = 3500 // 3.5 seconds OFF (European standard)
+            val toneSamples = (sampleRate * toneDurationMs / 1000).toInt()
             val silenceSamples = (sampleRate * silenceDurationMs / 1000).toInt()
             
             val audioFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -497,13 +497,13 @@ class VoipEngine(
             val toneBuffer = ShortArray(toneSamples)
             val silenceBuffer = ShortArray(silenceSamples)
             
-            // Generate 400 Hz sine wave
+            // Generate 440 Hz sine wave (standard European ringback)
             for (i in 0 until toneSamples) {
                 val sample = ((Short.MAX_VALUE * sin(2 * PI * frequency * i / sampleRate)).toInt()).toShort()
                 toneBuffer[i] = sample
             }
             
-            // Play pattern: 1 second tone + 0.5 second silence, repeat
+            // Play pattern: 1.5 seconds tone + 3.5 seconds silence, repeat
             while (ringbackShouldPlay && ringbackAudioTrack != null) {
                 ringbackAudioTrack?.write(toneBuffer, 0, toneSamples, AudioTrack.WRITE_BLOCKING)
                 ringbackAudioTrack?.write(silenceBuffer, 0, silenceSamples, AudioTrack.WRITE_BLOCKING)
