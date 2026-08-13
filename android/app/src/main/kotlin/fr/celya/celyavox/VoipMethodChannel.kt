@@ -169,6 +169,11 @@ class VoipMethodChannel(
                     engine.unsubscribePresence(contact)
                     result.success(null)
                 }
+                "getPresenceStatus" -> {
+                    val contact = requireArgument<String>(call, "contact")
+                    val status = engine.getPresenceStatus(contact)
+                    result.success(status)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: IllegalArgumentException) {

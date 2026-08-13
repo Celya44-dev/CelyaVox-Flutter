@@ -78,6 +78,11 @@ class VoipEngine {
   Future<void> unsubscribePresence(String contact) =>
       _invoke('unsubscribePresence', <String, dynamic>{'contact': contact});
 
+  Future<String> getPresenceStatus(String contact) async {
+    final result = await _invoke('getPresenceStatus', <String, dynamic>{'contact': contact});
+    return (result as String?) ?? 'offline';
+  }
+
   Future<dynamic> _invoke(String method, [Map<String, dynamic>? arguments]) async {
     try {
       return await _channel.invokeMethod<dynamic>(method, arguments);

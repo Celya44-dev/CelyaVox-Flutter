@@ -173,6 +173,15 @@ class PjsipEngine private constructor() {
         return nativeUnsubscribePresence(contact)
     }
 
+    @Synchronized
+    fun getPresenceStatus(contact: String): String {
+        if (!initialized.get()) {
+            Log.w(TAG, "getPresenceStatus ignored: engine not initialized")
+            return "offline"
+        }
+        return nativeGetPresenceStatus(contact)
+    }
+
     private external fun nativeInit(): Boolean
     private external fun nativeRegister(username: String, password: String, domain: String, proxy: String): Boolean
     private external fun nativeUnregister()
@@ -184,4 +193,5 @@ class PjsipEngine private constructor() {
     private external fun nativeGetCallerInfo(callId: String): String?
     private external fun nativeSubscribePresence(contact: String): Boolean
     private external fun nativeUnsubscribePresence(contact: String): Boolean
+    private external fun nativeGetPresenceStatus(contact: String): String
 }

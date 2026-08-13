@@ -152,6 +152,11 @@ class VoipEngine(
         sipEngine.unsubscribePresence(contact)
     }
 
+    fun getPresenceStatus(contact: String): String {
+        Log.i(TAG, "VoipEngine.getPresenceStatus contact=$contact")
+        return sipEngine.getPresenceStatus(contact)
+    }
+
     private fun initCallAudio() {
         val ctx = appContext ?: return
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
