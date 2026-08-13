@@ -54,6 +54,11 @@ sealed class VoipEvent {
         );
       case 'navigate_to_call_history':
         return NavigateToCallHistoryEvent();
+      case 'presence_state':
+        return PresenceStateEvent(
+          number: map['number'] as String? ?? '',
+          state: map['state'] as String? ?? 'offline',
+        );
       default:
         throw PlatformException(
           code: 'UNKNOWN_EVENT',
@@ -118,6 +123,13 @@ class FcmTokenEvent extends VoipEvent {
 
 class NavigateToCallHistoryEvent extends VoipEvent {
   const NavigateToCallHistoryEvent();
+}
+
+class PresenceStateEvent extends VoipEvent {
+  final String number;
+  final String state; // 'available', 'busy', 'away', 'offline', etc.
+
+  const PresenceStateEvent({required this.number, required this.state});
 }
 
 /// Exposes a broadcast stream of platform VoIP events.

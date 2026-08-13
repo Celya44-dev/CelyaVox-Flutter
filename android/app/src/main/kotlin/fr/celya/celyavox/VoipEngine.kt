@@ -9,7 +9,6 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.Ringtone
 import android.media.RingtoneManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.content.BroadcastReceiver
 import android.content.Intent
@@ -46,7 +45,6 @@ class VoipEngine(
     private var incomingRingtone: Ringtone? = null
     private var incomingVibrator: Vibrator? = null
     private var outgoingRingbackTone: Ringtone? = null
-    private var outgoingToneGenerator: ToneGenerator? = null
     private val callerIdMap = mutableMapOf<String, String>()
 
     init {
@@ -142,6 +140,16 @@ class VoipEngine(
 
     fun refreshAudio(): Boolean {
         return sipEngine.refreshAudio()
+    }
+
+    fun subscribePresence(contact: String) {
+        Log.i(TAG, "VoipEngine.subscribePresence contact=$contact")
+        sipEngine.subscribePresence(contact)
+    }
+
+    fun unsubscribePresence(contact: String) {
+        Log.i(TAG, "VoipEngine.unsubscribePresence contact=$contact")
+        sipEngine.unsubscribePresence(contact)
     }
 
     private fun initCallAudio() {
@@ -397,7 +405,7 @@ class VoipEngine(
         if (ctx == null) {
             return
         }
-        if (outgoingToneGenerator != null || outgoingRingbackTone != null) {
+        if (outgoingRingbackTone != null) {
             return
         }
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -414,60 +422,31 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            // Use ToneGenerator to play DIAL tone for outgoing calls
+            // Use system ringtone for outgoing calls, but play it on STREAM_VOICE_CALL
             try {
-                val toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, ToneGenerator.MAX_VOLUME)
-                outgoingToneGenerator = toneGenerator
-                // Start playing dial tone (appropriate for outgoing call feedback)
-                mainHandler.post {
-                    playRingbackTonePattern(toneGenerator)
-                }
-                Log.i(TAG, "Started outgoing ringback tone using dial tone pattern")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to create ToneGenerator for ringback tone: ${e.message}", e)
-                // Fallback to regular ringtone if ToneGenerator fails
-                try {
-                    val uri = RingtoneManager.getActualDefaultRingtoneUri(
-                        ctx,
-                        RingtoneManager.TYPE_RINGTONE
-                    )
-                    val ring = RingtoneManager.getRingtone(ctx, uri)
-                    if (ring != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            ring.audioAttributes = AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            ring.isLooping = true
-                        }
-                        outgoingRingbackTone = ring
-                        ring.play()
+                val uri = RingtoneManager.getActualDefaultRingtoneUri(
+                    ctx,
+                    RingtoneManager.TYPE_RINGTONE
+                )
+                val ring = RingtoneManager.getRingtone(ctx, uri)
+                if (ring != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        ring.audioAttributes = AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
                     }
-                } catch (e2: Exception) {
-                    Log.w(TAG, "Failed to fallback to ringtone: ${e2.message}", e2)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        ring.isLooping = true
+                    }
+                    outgoingRingbackTone = ring
+                    ring.play()
+                    Log.i(TAG, "Started outgoing ringback tone (system ringtone on STREAM_VOICE_CALL)")
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start outgoing ringback tone: ${e.message}", e)
             }
         }
-    }
-
-    private fun playRingbackTonePattern(toneGenerator: ToneGenerator) {
-        // Ringback tone pattern using DIAL tone: 1 second ON, 0.5 second OFF, repeat
-        val pattern = Runnable {
-            try {
-                toneGenerator.startTone(ToneGenerator.TONE_SUP_DIAL, 1000) // 1 second of dial tone
-                mainHandler.postDelayed({
-                    // After 1 second, schedule next cycle
-                    if (outgoingToneGenerator != null) {
-                        playRingbackTonePattern(toneGenerator)
-                    }
-                }, 1500) // Wait 1 second (tone) + 0.5 second (silence) = 1.5 seconds
-            } catch (e: Exception) {
-                Log.w(TAG, "Error playing ringback tone pattern: ${e.message}")
-            }
-        }
-        mainHandler.post(pattern)
     }
 
     private fun startIncomingRingtone() {
@@ -539,8 +518,6 @@ class VoipEngine(
         incomingRingtone = null
         outgoingRingbackTone?.stop()
         outgoingRingbackTone = null
-        outgoingToneGenerator?.release()
-        outgoingToneGenerator = null
         incomingVibrator?.cancel()
         incomingVibrator = null
     }

@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <mutex>
 #include <string>
+#include <map>
 
 #include <pjlib.h>
 #include <pjsip.h>
@@ -20,6 +21,7 @@ static std::mutex g_mutex;
 static bool g_initialized = false;
 static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
 static bool g_audio_ready = false;
+static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 
 static void ensure_pj_thread_registered(const char *name) {
     if (pj_thread_is_registered()) return;
@@ -165,6 +167,54 @@ static void on_reg_state(pjsua_acc_id acc_id) {
     emit_event("registration", message.c_str());
 }
 
+static void on_pres_status(pjsua_buddy_id buddy_id, pjsua_buddy_info *info, pjsip_evsub_state state, pjsip_event *e) {
+    (void)e;
+    if (!info) return;
+    
+    // Construire le contact et l'état
+    std::string contact;
+    if (info->uri.ptr && info->uri.slen > 0) {
+        contact.assign(info->uri.ptr, info->uri.slen);
+    }
+    
+    // Parse la présence du buddy
+    std::string presence_state = "offline";  // défaut
+    
+    if (state == PJSIP_EVSUB_STATE_ACTIVE) {
+        // La subscription est active - analyser le statut présence
+        if (info->presence_status == PJSUA_BUDDY_STATUS_ONLINE) {
+            presence_state = "available";
+        } else if (info->presence_status == PJSUA_BUDDY_STATUS_OFFLINE) {
+            presence_state = "offline";
+        } else if (info->presence_status == PJSUA_BUDDY_STATUS_UNKNOWN) {
+            presence_state = "offline";
+        }
+        
+        // Si activity présence existe, affiner l'état
+        if (info->activity_text.ptr && info->activity_text.slen > 0) {
+            std::string activity(info->activity_text.ptr, info->activity_text.slen);
+            if (activity.find("on the phone") != std::string::npos || 
+                activity.find("busy") != std::string::npos) {
+                presence_state = "busy";
+            } else if (activity.find("away") != std::string::npos ||
+                       activity.find("in a meeting") != std::string::npos) {
+                presence_state = "away";
+            } else if (activity.find("do not disturb") != std::string::npos ||
+                       activity.find("dnd") != std::string::npos) {
+                presence_state = "dnd";
+            }
+        }
+    } else if (state == PJSIP_EVSUB_STATE_TERMINATED) {
+        presence_state = "offline";
+    }
+    
+    // Émettre l'événement vers Dart
+    std::string message = contact + "|" + presence_state;
+    emit_event("presence_state", message.c_str());
+    
+    LOGI("on_pres_status: buddy=%d, contact=%s, state=%s", buddy_id, contact.c_str(), presence_state.c_str());
+}
+
 static bool ensure_endpoint() {
     ensure_pj_thread_registered("jni");
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -182,6 +232,7 @@ static bool ensure_endpoint() {
     ua_cfg.cb.on_call_state = &on_call_state;
     ua_cfg.cb.on_call_media_state = &on_call_media_state;
     ua_cfg.cb.on_reg_state = &on_reg_state;
+    ua_cfg.cb.on_buddy_state = &on_pres_status;
     static const pj_str_t kUserAgent = pj_str(const_cast<char *>("CelyaVox Mobile"));
     ua_cfg.user_agent = kUserAgent;
 
@@ -498,4 +549,88 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetCallerInfo(JNIEnv *env, jobject, jst
     }
     
     return nullptr;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject, jstring jcontact) {
+    ensure_pj_thread_registered("jni");
+    if (!ensure_endpoint()) return JNI_FALSE;
+    if (g_acc_id == PJSUA_INVALID_ID) {
+        LOGW("nativeSubscribePresence: account not registered yet");
+        return JNI_FALSE;
+    }
+    
+    const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    
+    // Vérifier si déjà subscribé
+    auto it = g_buddy_subscriptions.find(contact_str);
+    if (it != g_buddy_subscriptions.end()) {
+        LOGI("nativeSubscribePresence: already subscribed to %s", contact_str);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        return JNI_TRUE;
+    }
+    
+    // Ajouter buddy et subscribe
+    pjsua_buddy_config buddy_cfg;
+    pjsua_buddy_config_default(&buddy_cfg);
+    buddy_cfg.uri = pj_str(const_cast<char *>(contact_str));
+    buddy_cfg.subscribe = PJ_TRUE;
+    
+    pjsua_buddy_id buddy_id = pjsua_buddy_add(&buddy_cfg);
+    if (buddy_id == PJSUA_INVALID_ID) {
+        LOGE("nativeSubscribePresence: failed to add buddy for %s", contact_str);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        return JNI_FALSE;
+    }
+    
+    // Subscribe à la présence
+    pj_status_t status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
+    if (status != PJ_SUCCESS) {
+        LOGE("nativeSubscribePresence: failed to subscribe presence for %s (status=%d)", contact_str, status);
+        pjsua_buddy_del(buddy_id);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        return JNI_FALSE;
+    }
+    
+    // Tracker la subscription
+    g_buddy_subscriptions[contact_str] = buddy_id;
+    LOGI("nativeSubscribePresence: subscribed to %s (buddy_id=%d)", contact_str, buddy_id);
+    
+    env->ReleaseStringUTFChars(jcontact, contact_str);
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobject, jstring jcontact) {
+    ensure_pj_thread_registered("jni");
+    if (!ensure_endpoint()) return JNI_FALSE;
+    
+    const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    
+    // Trouver et supprimer la subscription
+    auto it = g_buddy_subscriptions.find(contact_str);
+    if (it == g_buddy_subscriptions.end()) {
+        LOGW("nativeUnsubscribePresence: not subscribed to %s", contact_str);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        return JNI_FALSE;
+    }
+    
+    pjsua_buddy_id buddy_id = it->second;
+    pj_status_t status = pjsua_buddy_subscribe_pres(buddy_id, PJ_FALSE);
+    if (status != PJ_SUCCESS) {
+        LOGW("nativeUnsubscribePresence: failed to unsubscribe presence for %s (status=%d)", contact_str, status);
+    }
+    
+    status = pjsua_buddy_del(buddy_id);
+    if (status != PJ_SUCCESS) {
+        LOGW("nativeUnsubscribePresence: failed to delete buddy for %s (status=%d)", contact_str, status);
+    }
+    
+    g_buddy_subscriptions.erase(it);
+    LOGI("nativeUnsubscribePresence: unsubscribed from %s", contact_str);
+    
+    env->ReleaseStringUTFChars(jcontact, contact_str);
+    return JNI_TRUE;
 }

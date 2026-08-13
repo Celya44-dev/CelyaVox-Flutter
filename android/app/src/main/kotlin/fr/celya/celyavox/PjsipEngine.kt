@@ -158,6 +158,21 @@ class PjsipEngine private constructor() {
         }
     }
 
+    @Synchronized
+    fun subscribePresence(contact: String): Boolean {
+        if (!initialized.get()) init()
+        return nativeSubscribePresence(contact)
+    }
+
+    @Synchronized
+    fun unsubscribePresence(contact: String): Boolean {
+        if (!initialized.get()) {
+            Log.w(TAG, "unsubscribePresence ignored: engine not initialized")
+            return false
+        }
+        return nativeUnsubscribePresence(contact)
+    }
+
     private external fun nativeInit(): Boolean
     private external fun nativeRegister(username: String, password: String, domain: String, proxy: String): Boolean
     private external fun nativeUnregister()
@@ -167,4 +182,6 @@ class PjsipEngine private constructor() {
     private external fun nativeRefreshAudio(): Boolean
     private external fun nativeSendDtmf(callId: String, digits: String): Boolean
     private external fun nativeGetCallerInfo(callId: String): String?
+    private external fun nativeSubscribePresence(contact: String): Boolean
+    private external fun nativeUnsubscribePresence(contact: String): Boolean
 }

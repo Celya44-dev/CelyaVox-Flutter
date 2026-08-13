@@ -11,6 +11,7 @@ import '../theme/theme_controller.dart';
 import '../log/app_logger.dart';
 import '../voip/voip_events.dart';
 import '../voip/voip_engine.dart';
+import '../voip/blf_state_manager.dart';
 import 'in_call_page.dart';
 import 'settings_page.dart';
 import 'incoming_call_page.dart';
@@ -62,6 +63,7 @@ class _DialpadPageState extends State<DialpadPage> {
   int _favoritesSearchRequestId = 0;
   bool _isSearchingDialpad = false;
   StreamSubscription<SavedContactsEvent>? _favoritesChangesSub;
+  StreamSubscription<VoipEvent>? _presenceSub;
 
   @override
   void initState() {
@@ -72,18 +74,31 @@ class _DialpadPageState extends State<DialpadPage> {
     _listenRegistration();
     _registerOnStart();
     _listenFavoritesChanges();
+    _listenPresenceEvents(); // Écouter les événements de présence pour les BLF
   }
 
+  @override
   @override
   void dispose() {
     _eventsSub?.cancel();
     _favoritesChangesSub?.cancel();
+    _presenceSub?.cancel();
     _contactSearchDebounce?.cancel();
     _dialpadSearchDebounce?.cancel();
     _favoritesSearchDebounce?.cancel();
     _controller.dispose();
     _contactSearchController.dispose();
     _favoritesSearchController.dispose();
+    
+    // Unsubscriber de tous les contacts favoris
+    for (final contact in _savedContacts) {
+      try {
+        widget.engine.unsubscribePresence(contact.number);
+      } catch (e) {
+        AppLogger.instance.log('Erreur unsubscribe cleanup: $e');
+      }
+    }
+    
     super.dispose();
   }
 
@@ -110,6 +125,15 @@ class _DialpadPageState extends State<DialpadPage> {
         _savedContacts = contacts;
         _isLoadingSavedContacts = false;
       });
+      // Subscribe à la présence de tous les favoris
+      for (final contact in contacts) {
+        try {
+          await widget.engine.subscribePresence(contact.number);
+          AppLogger.instance.log('Subscribé à: ${contact.number}');
+        } catch (e) {
+          AppLogger.instance.log('Erreur sub présence ${contact.number}: $e');
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -225,6 +249,17 @@ class _DialpadPageState extends State<DialpadPage> {
         setState(() {
           _favoritesSearchResults = const [];
         });
+      }
+    });
+  }
+
+  void _listenPresenceEvents() {
+    _presenceSub = VoipEvents.stream.listen((event) {
+      if (event is PresenceStateEvent && mounted) {
+        // Mettre à jour l'état BLF du contact
+        BLFStateManager().handlePresenceEvent(event);
+        // Déclencher un refresh pour afficher les changements
+        setState(() {});
       }
     });
   }
@@ -462,6 +497,13 @@ class _DialpadPageState extends State<DialpadPage> {
       if (!mounted) return;
       if (isFavorites) {
         setState(() => _savedContacts = updated);
+        // Subscribe à la présence du contact favori
+        try {
+          await widget.engine.subscribePresence(number);
+          AppLogger.instance.log('Subscribé à la présence de: $number');
+        } catch (e) {
+          AppLogger.instance.log('Erreur subscription présence: $e');
+        }
       } else {
         setState(() => _contactPageSavedContacts = updated);
       }
@@ -515,6 +557,13 @@ class _DialpadPageState extends State<DialpadPage> {
       if (!mounted) return;
       if (isFavorites) {
         setState(() => _savedContacts = updated);
+        // Unsubscribe à la présence du contact favori
+        try {
+          await widget.engine.unsubscribePresence(contact.number);
+          AppLogger.instance.log('Désubscribé de la présence de: ${contact.number}');
+        } catch (e) {
+          AppLogger.instance.log('Erreur unsubscription présence: $e');
+        }
       } else {
         setState(() => _contactPageSavedContacts = updated);
       }
@@ -643,11 +692,19 @@ class _DialpadPageState extends State<DialpadPage> {
         children: [
           TextField(
             controller: _favoritesSearchController,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
               labelText: 'Recherche favoris',
               hintText: 'Tapez le nom ou les 5 premiers chiffres',
-              prefixIcon: Icon(Icons.search),
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _favoritesSearchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _favoritesSearchController.clear();
+                      },
+                    )
+                  : null,
             ),
             textInputAction: TextInputAction.search,
             onChanged: _onFavoritesSearchChanged,
@@ -684,22 +741,43 @@ class _DialpadPageState extends State<DialpadPage> {
                       )
                     else
                       ..._savedContacts.map(
-                        (contact) => ListTile(
-                          leading: const Icon(Icons.favorite),
-                          title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
-                          subtitle: Text(
-                            contact.ou.isEmpty
-                                ? contact.number
-                                : '${contact.ou}\n${contact.number}',
-                          ),
-                          isThreeLine: contact.ou.isNotEmpty,
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Supprimer',
-                            onPressed: () => _removeSavedContact(contact),
-                          ),
-                          onTap: () => _callSavedContact(contact),
-                        ),
+                        (contact) {
+                          final blfState = BLFStateManager().getState(contact.number);
+                          final blfColor = BLFStateManager.getColorForState(blfState);
+                          return ListTile(
+                            leading: Stack(
+                              children: [
+                                const Icon(Icons.favorite),
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: blfColor,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 1),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
+                            subtitle: Text(
+                              contact.ou.isEmpty
+                                  ? contact.number
+                                  : '${contact.ou}\n${contact.number}',
+                            ),
+                            isThreeLine: contact.ou.isNotEmpty,
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              tooltip: 'Supprimer',
+                              onPressed: () => _removeSavedContact(contact),
+                            ),
+                            onTap: () => _callSavedContact(contact),
+                          );
+                        },
                       ),
                   ],
                 ),
@@ -758,13 +836,32 @@ class _DialpadPageState extends State<DialpadPage> {
                                                 itemBuilder: (context, index) {
                                                   final contact = _savedContacts[index];
                                                   final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
+                                                  final blfState = BLFStateManager().getState(contact.number);
+                                                  final blfColor = BLFStateManager.getColorForState(blfState);
                                                   final subtitleParts = <String>[];
                                                   if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
                                                   if (contact.number.isNotEmpty) {
                                                     subtitleParts.add(contact.number);
                                                   }
                                                   return ListTile(
-                                                    leading: const Icon(Icons.favorite),
+                                                    leading: Stack(
+                                                      children: [
+                                                        const Icon(Icons.favorite),
+                                                        Positioned(
+                                                          bottom: 0,
+                                                          right: 0,
+                                                          child: Container(
+                                                            width: 10,
+                                                            height: 10,
+                                                            decoration: BoxDecoration(
+                                                              color: blfColor,
+                                                              shape: BoxShape.circle,
+                                                              border: Border.all(color: Colors.white, width: 1),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                     title: Text(name),
                                                     subtitle: subtitleParts.isEmpty
                                                         ? null
@@ -791,13 +888,32 @@ class _DialpadPageState extends State<DialpadPage> {
                                         final contact = _favoritesSearchResults[index];
                                         final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
                                         final isSaved = _isContactSaved(contact.number);
+                                        final blfState = BLFStateManager().getState(contact.number);
+                                        final blfColor = BLFStateManager.getColorForState(blfState);
                                         final subtitleParts = <String>[];
                                         if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
                                         if (contact.number.isNotEmpty) {
                                           subtitleParts.add(contact.number);
                                         }
                                         return ListTile(
-                                          leading: const Icon(Icons.favorite),
+                                          leading: Stack(
+                                            children: [
+                                              const Icon(Icons.favorite),
+                                              Positioned(
+                                                bottom: 0,
+                                                right: 0,
+                                                child: Container(
+                                                  width: 10,
+                                                  height: 10,
+                                                  decoration: BoxDecoration(
+                                                    color: blfColor,
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(color: Colors.white, width: 1),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                           title: Text(name),
                                           subtitle: subtitleParts.isEmpty
                                               ? null
@@ -975,11 +1091,19 @@ class _DialpadPageState extends State<DialpadPage> {
         children: [
           TextField(
             controller: _contactSearchController,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
               labelText: 'Recherche contact',
               hintText: 'Tapez au moins 3 caractères',
-              prefixIcon: Icon(Icons.search),
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _contactSearchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        _contactSearchController.clear();
+                      },
+                    )
+                  : null,
             ),
             textInputAction: TextInputAction.search,
             onChanged: _onContactSearchChanged,

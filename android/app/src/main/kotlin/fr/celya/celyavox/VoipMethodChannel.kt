@@ -159,6 +159,16 @@ class VoipMethodChannel(
                     engine.endCall(callId)
                     result.success(null)
                 }
+                "subscribePresence" -> {
+                    val contact = requireArgument<String>(call, "contact")
+                    engine.subscribePresence(contact)
+                    result.success(null)
+                }
+                "unsubscribePresence" -> {
+                    val contact = requireArgument<String>(call, "contact")
+                    engine.unsubscribePresence(contact)
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: IllegalArgumentException) {
