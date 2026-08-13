@@ -167,44 +167,23 @@ static void on_reg_state(pjsua_acc_id acc_id) {
     emit_event("registration", message.c_str());
 }
 
-static void on_pres_status(pjsua_buddy_id buddy_id, pjsua_buddy_info *info, pjsip_evsub_state state, pjsip_event *e) {
-    (void)e;
-    if (!info) return;
+static void on_buddy_state(pjsua_buddy_id buddy_id) {
+    pjsua_buddy_info info;
+    pjsua_buddy_get_info(buddy_id, &info);
     
     // Construire le contact et l'état
     std::string contact;
-    if (info->uri.ptr && info->uri.slen > 0) {
-        contact.assign(info->uri.ptr, info->uri.slen);
+    if (info.uri.ptr && info.uri.slen > 0) {
+        contact.assign(info.uri.ptr, info.uri.slen);
     }
     
-    // Parse la présence du buddy
+    // Parse la présence du buddy basé sur le statut
     std::string presence_state = "offline";  // défaut
     
-    if (state == PJSIP_EVSUB_STATE_ACTIVE) {
-        // La subscription est active - analyser le statut présence
-        if (info->presence_status == PJSUA_BUDDY_STATUS_ONLINE) {
-            presence_state = "available";
-        } else if (info->presence_status == PJSUA_BUDDY_STATUS_OFFLINE) {
-            presence_state = "offline";
-        } else if (info->presence_status == PJSUA_BUDDY_STATUS_UNKNOWN) {
-            presence_state = "offline";
-        }
-        
-        // Si activity présence existe, affiner l'état
-        if (info->activity_text.ptr && info->activity_text.slen > 0) {
-            std::string activity(info->activity_text.ptr, info->activity_text.slen);
-            if (activity.find("on the phone") != std::string::npos || 
-                activity.find("busy") != std::string::npos) {
-                presence_state = "busy";
-            } else if (activity.find("away") != std::string::npos ||
-                       activity.find("in a meeting") != std::string::npos) {
-                presence_state = "away";
-            } else if (activity.find("do not disturb") != std::string::npos ||
-                       activity.find("dnd") != std::string::npos) {
-                presence_state = "dnd";
-            }
-        }
-    } else if (state == PJSIP_EVSUB_STATE_TERMINATED) {
+    // En PJSIP, on utilise l'attribute 'online_status' plutôt que 'presence_status'
+    if (info.online_status) {
+        presence_state = "available";
+    } else {
         presence_state = "offline";
     }
     
@@ -212,7 +191,7 @@ static void on_pres_status(pjsua_buddy_id buddy_id, pjsua_buddy_info *info, pjsi
     std::string message = contact + "|" + presence_state;
     emit_event("presence_state", message.c_str());
     
-    LOGI("on_pres_status: buddy=%d, contact=%s, state=%s", buddy_id, contact.c_str(), presence_state.c_str());
+    LOGI("on_buddy_state: buddy=%d, contact=%s, online=%d, state=%s", buddy_id, contact.c_str(), info.online_status, presence_state.c_str());
 }
 
 static bool ensure_endpoint() {
@@ -232,7 +211,7 @@ static bool ensure_endpoint() {
     ua_cfg.cb.on_call_state = &on_call_state;
     ua_cfg.cb.on_call_media_state = &on_call_media_state;
     ua_cfg.cb.on_reg_state = &on_reg_state;
-    ua_cfg.cb.on_buddy_state = &on_pres_status;
+    ua_cfg.cb.on_buddy_state = &on_buddy_state;
     static const pj_str_t kUserAgent = pj_str(const_cast<char *>("CelyaVox Mobile"));
     ua_cfg.user_agent = kUserAgent;
 
@@ -577,15 +556,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.uri = pj_str(const_cast<char *>(contact_str));
     buddy_cfg.subscribe = PJ_TRUE;
     
-    pjsua_buddy_id buddy_id = pjsua_buddy_add(&buddy_cfg);
-    if (buddy_id == PJSUA_INVALID_ID) {
-        LOGE("nativeSubscribePresence: failed to add buddy for %s", contact_str);
+    pjsua_buddy_id buddy_id;
+    pj_status_t status = pjsua_buddy_add(&buddy_cfg, &buddy_id);
+    if (status != PJ_SUCCESS) {
+        LOGE("nativeSubscribePresence: failed to add buddy for %s (status=%d)", contact_str, status);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return JNI_FALSE;
     }
     
     // Subscribe à la présence
-    pj_status_t status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
+    status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
     if (status != PJ_SUCCESS) {
         LOGE("nativeSubscribePresence: failed to subscribe presence for %s (status=%d)", contact_str, status);
         pjsua_buddy_del(buddy_id);
