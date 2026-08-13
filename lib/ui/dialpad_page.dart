@@ -113,6 +113,15 @@ class _DialpadPageState extends State<DialpadPage> {
     }
   }
 
+  Future<void> _subscribePresenceWithPrefix(String number) async {
+    try {
+      final prefix = await ProvisioningChannel.getApiPrefixe();
+      await widget.engine.subscribePresence(number, prefix: prefix);
+    } catch (e) {
+      await widget.engine.subscribePresence(number);
+    }
+  }
+
   Future<void> _loadSavedContacts() async {
     print('>>> _loadSavedContacts START');
     setState(() {
@@ -131,7 +140,7 @@ class _DialpadPageState extends State<DialpadPage> {
       for (final contact in contacts) {
         try {
           print('>>> Subscribing to presence: ${contact.number}');
-          await widget.engine.subscribePresence(contact.number);
+          await _subscribePresenceWithPrefix(contact.number);
           print('>>> ✓ Subscribé à: ${contact.number}');
           AppLogger.instance.log('Subscribé à: ${contact.number}');
         } catch (e) {
@@ -510,7 +519,7 @@ class _DialpadPageState extends State<DialpadPage> {
         // Subscribe à la présence du contact favori
         try {
           print('>>> Calling subscribePresence for new favorite: $number');
-          await widget.engine.subscribePresence(number);
+          await _subscribePresenceWithPrefix(number);
           print('>>> ✓ Subscribé à la présence de: $number');
           AppLogger.instance.log('Subscribé à la présence de: $number');
         } catch (e) {

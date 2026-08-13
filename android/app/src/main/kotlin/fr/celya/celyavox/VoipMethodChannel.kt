@@ -161,8 +161,9 @@ class VoipMethodChannel(
                 }
                 "subscribePresence" -> {
                     val contact = requireArgument<String>(call, "contact")
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact")
-                    engine.subscribePresence(contact)
+                    val prefix = call.argument<String>("prefix") ?: ""
+                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact, prefix=$prefix")
+                    engine.subscribePresence(contact, prefix)
                     result.success(null)
                 }
                 "unsubscribePresence" -> {

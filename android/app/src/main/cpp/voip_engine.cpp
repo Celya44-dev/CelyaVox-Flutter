@@ -21,6 +21,7 @@ static std::mutex g_mutex;
 static bool g_initialized = false;
 static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
 static bool g_audio_ready = false;
+static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 
 static void ensure_pj_thread_registered(const char *name) {
@@ -352,6 +353,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
         LOGE("Account add failed: %d", status);
         return JNI_FALSE;
     }
+    
+    // Sauvegarder le domaine pour construire les URI de buddy
+    g_account_domain = domain;
     pjsua_acc_set_default(g_acc_id);
     LOGI("Registered account id=%d", g_acc_id);
     return JNI_TRUE;
@@ -516,7 +520,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetCallerInfo(JNIEnv *env, jobject, jst
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject, jstring jcontact) {
+Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject, jstring jcontact, jstring jprefix) {
     ensure_pj_thread_registered("jni");
     if (!ensure_endpoint()) return JNI_FALSE;
     if (g_acc_id == PJSUA_INVALID_ID) {
@@ -525,7 +529,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     }
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
-    LOGI(">>> nativeSubscribePresence CALLED: contact=%s", contact_str);
+    const char *prefix_str = env->GetStringUTFChars(jprefix, nullptr);
+    LOGI(">>> nativeSubscribePresence CALLED: contact=%s, prefix=%s", contact_str, prefix_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Vérifier si déjà subscribé
@@ -533,13 +538,34 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     if (it != g_buddy_subscriptions.end()) {
         LOGI(">>> nativeSubscribePresence: already subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_TRUE;
     }
+    
+    // Construire un URI SIP valide: sip:contact@domain
+    if (g_account_domain.empty()) {
+        LOGE(">>> nativeSubscribePresence: account domain not available, cannot subscribe");
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_FALSE;
+    }
+    
+    // Appliquer le prefix si fourni
+    std::string contact_with_prefix = std::string(contact_str);
+    if (prefix_str && strlen(prefix_str) > 0 && contact_with_prefix.find(prefix_str) != 0) {
+        contact_with_prefix = std::string(prefix_str) + contact_str;
+    }
+    LOGI(">>> nativeSubscribePresence: contact with prefix=%s", contact_with_prefix.c_str());
+    
+    // Buffer pour l'URI SIP
+    char buddy_uri_buf[256];
+    pj_ansi_snprintf(buddy_uri_buf, sizeof(buddy_uri_buf), "sip:%s@%s", contact_with_prefix.c_str(), g_account_domain.c_str());
+    LOGI(">>> nativeSubscribePresence: constructed buddy URI=%s", buddy_uri_buf);
     
     // Configuration du buddy pour SUBSCRIBE/NOTIFY de présence
     pjsua_buddy_config buddy_cfg;
     pjsua_buddy_config_default(&buddy_cfg);
-    buddy_cfg.uri = pj_str(const_cast<char *>(contact_str));
+    buddy_cfg.uri = pj_str(buddy_uri_buf);
     buddy_cfg.subscribe = PJ_TRUE;  // Activer la subscription de présence
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
@@ -548,6 +574,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     if (status != PJ_SUCCESS) {
         LOGE(">>> nativeSubscribePresence: pjsua_buddy_add FAILED for %s (status=%d)", contact_str, status);
         env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_FALSE;
     }
     
@@ -556,6 +583,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, sending SUBSCRIBE to server for: %s", buddy_id, contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
+    env->ReleaseStringUTFChars(jprefix, prefix_str);
     return JNI_TRUE;
 }
 

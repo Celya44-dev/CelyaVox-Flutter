@@ -159,10 +159,10 @@ class PjsipEngine private constructor() {
     }
 
     @Synchronized
-    fun subscribePresence(contact: String): Boolean {
-        Log.i(TAG, ">>> PjsipEngine.subscribePresence: contact=$contact, initialized=${initialized.get()}")
+    fun subscribePresence(contact: String, prefix: String = ""): Boolean {
+        Log.i(TAG, ">>> PjsipEngine.subscribePresence: contact=$contact, prefix=$prefix, initialized=${initialized.get()}")
         if (!initialized.get()) init()
-        val result = nativeSubscribePresence(contact)
+        val result = nativeSubscribePresence(contact, prefix)
         Log.i(TAG, ">>> PjsipEngine.subscribePresence result: $result")
         return result
     }
@@ -198,7 +198,7 @@ class PjsipEngine private constructor() {
     private external fun nativeRefreshAudio(): Boolean
     private external fun nativeSendDtmf(callId: String, digits: String): Boolean
     private external fun nativeGetCallerInfo(callId: String): String?
-    private external fun nativeSubscribePresence(contact: String): Boolean
+    private external fun nativeSubscribePresence(contact: String, prefix: String): Boolean
     private external fun nativeUnsubscribePresence(contact: String): Boolean
     private external fun nativeGetPresenceStatus(contact: String): String
 }
