@@ -129,8 +129,6 @@ class VoipEngine(
 
     fun acceptCall(callId: String) {
         Log.i(TAG, "VoipEngine.acceptCall callId=$callId")
-        val storedCallerId = callerIdMap.getOrDefault(callId, "")
-        Log.i(TAG, ">>> acceptCall: callerIdMap=$callerIdMap, storedCallerId=\"$storedCallerId\"")
         // Initialize audio for incoming calls (same as for outgoing calls)
         initCallAudio()
         // Activate real audio devices in PJSIP
@@ -482,7 +480,7 @@ class VoipEngine(
                     val callerId = parseCallerInfo(rawCallerInfo)
                     // Store CallerID for this call
                     callerIdMap[message] = callerId
-                    Log.i(TAG, ">>> INCOMING_CALL: rawCallerInfo=\"$rawCallerInfo\", parsed callerId=\"$callerId\", callId=$message, map now: $callerIdMap")
+                    Log.i(TAG, "INCOMING_CALL: callId=$message, callerId=\"$callerId\"")
                     
                     // Always notify Flutter about the incoming call
                     incomingCall(message, callerId)
@@ -562,7 +560,7 @@ class VoipEngine(
     }
 
     fun incomingCall(callId: String, callerId: String?) {
-        Log.i(TAG, ">>> incomingCall: sending to Flutter callId=$callId, callerId=\"$callerId\"")
+        Log.i(TAG, "incomingCall: callId=$callId, callerId=\"$callerId\"")
         emit(
             mapOf(
                 "type" to "incoming_call",
@@ -580,7 +578,7 @@ class VoipEngine(
         }
         Log.i(TAG, "Emitting call_connected to Flutter callId=$callId")
         val callerId = callerIdMap.getOrDefault(callId, "")
-        Log.i(TAG, ">>> callConnected: callerIdMap=$callerIdMap, callerId for $callId = \"$callerId\"")
+        Log.i(TAG, "callConnected: callId=$callId, callerId=\"$callerId\"")
         emit(
             mapOf(
                 "type" to "call_connected",

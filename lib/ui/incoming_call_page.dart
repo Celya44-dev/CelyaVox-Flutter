@@ -28,7 +28,7 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
   @override
   void initState() {
     super.initState();
-    AppLogger.instance.log('>>> IncomingCallPage.initState: callId=${widget.callId}, callerId=\"${widget.callerId}\" (isEmpty=${widget.callerId.isEmpty})');
+
     _startRinging();
     _loadSavedContact();
     _listenCallEvents();
@@ -102,7 +102,7 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
 
   Future<void> _accept() async {
     setState(() => _isProcessing = true);
-    AppLogger.instance.log('>>> IncomingCallPage._accept: callId=${widget.callId}, callerId=${widget.callerId}');
+
     try {
       final ok = await _ensureMicPermission();
       if (!ok) return;
@@ -152,7 +152,9 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
   @override
   Widget build(BuildContext context) {
     final displayNumber = _displayNumber(widget.callerId);
-    AppLogger.instance.log('IncomingCallPage.build: callerId=${widget.callerId}, displayNumber=$displayNumber');
+    // Fallback to "Appel entrant" if no caller info available
+    final displayText = displayNumber.isNotEmpty ? displayNumber : 'Appel entrant';
+
     return Scaffold(
       appBar: AppBar(title: const Text('Appel entrant')),
       body: Center(
@@ -162,7 +164,7 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
             const Icon(Icons.ring_volume, size: 64),
             const SizedBox(height: 16),
             Text(
-              displayNumber,
+              displayText,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             if (_savedContactName != null)

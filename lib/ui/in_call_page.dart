@@ -38,7 +38,6 @@ class _InCallPageState extends State<InCallPage> {
     super.initState();
     _activeCallId = widget.callId;
     _activeCallerId = widget.callerId;
-    AppLogger.instance.log('>>> InCallPage.initState: callId=${widget.callId}, callerId=${widget.callerId}, parseResult=${_parseCallerInfo(widget.callerId)}');
     _ensureMicPermission();
     _loadBluetoothAvailability();
     _loadSavedContact();
@@ -136,21 +135,16 @@ class _InCallPageState extends State<InCallPage> {
   void _listenCallUpdates() {
     _eventsSub = VoipEvents.stream.listen((event) {
       if (event is CallConnectedEvent) {
-        AppLogger.instance.log('>>> InCallPage.CallConnectedEvent: callId=${event.callId}, callerId=${event.callerId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
             _activeCallId = event.callId;
             // Only update callerId if the event has one, preserve the initial value if empty
             if (event.callerId.isNotEmpty) {
               _activeCallerId = event.callerId;
-              AppLogger.instance.log('>>> InCallPage.state updated callerId: _activeCallerId=$_activeCallerId');
-            } else {
-              AppLogger.instance.log('>>> InCallPage.CallConnectedEvent has empty callerId, keeping initial: $_activeCallerId');
             }
           });
         }
       } else if (event is OutgoingCallEvent) {
-        AppLogger.instance.log('>>> InCallPage.OutgoingCallEvent: callId=${event.callId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() => _activeCallId = event.callId);
         }
@@ -255,10 +249,14 @@ class _InCallPageState extends State<InCallPage> {
 
   @override
   Widget build(BuildContext context) {
-    final displayText = _activeCallerId.isNotEmpty 
-                  ? _parseCallerInfo(_activeCallerId)
-                  : _displayNumber(widget.callId);
-    AppLogger.instance.log('>>> InCallPage.build: _activeCallerId="$_activeCallerId", displayText="$displayText"');
+    // Determine display text: always show caller ID
+    String displayText = '';
+    if (_activeCallerId.isNotEmpty) {
+      displayText = _parseCallerInfo(_activeCallerId);
+    } else if (_savedContactName != null && _savedContactName!.isNotEmpty) {
+      displayText = _savedContactName!;
+    }
+    
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -269,10 +267,11 @@ class _InCallPageState extends State<InCallPage> {
             children: [
               const Icon(Icons.call, size: 48),
               const SizedBox(height: 12),
-              Text(
-                displayText,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
+              if (displayText.isNotEmpty)
+                Text(
+                  displayText,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               if (_savedContactName != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
