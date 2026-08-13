@@ -51,9 +51,9 @@ class _InCallPageState extends State<InCallPage> {
     super.dispose();
   }
 
-  void _startRinging() async {
+  void _startRinging({bool isOutgoing = false}) async {
     try {
-      await widget.engine.startInAppRinging();
+      await widget.engine.startInAppRinging(isOutgoing: isOutgoing);
     } catch (e) {
       AppLogger.instance.log('Erreur démarrage ringtone: $e');
     }
@@ -154,7 +154,7 @@ class _InCallPageState extends State<InCallPage> {
       if (event is CallRingingEvent) {
         // Outgoing call is ringing (remote party is receiving the call)
         if (mounted) {
-          _startRinging();
+          _startRinging(isOutgoing: true);
         }
       } else if (event is CallConnectedEvent) {
         _stopRinging();

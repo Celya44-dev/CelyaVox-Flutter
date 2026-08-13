@@ -87,7 +87,8 @@ class VoipMethodChannel(
                     result.success(null)
                 }
                 "startInAppRinging" -> {
-                    engine.startInAppRinging()
+                    val isOutgoing = call.argument<Boolean>("isOutgoing") ?: false
+                    engine.startInAppRinging(isOutgoing)
                     result.success(null)
                 }
                 "stopInAppRinging" -> {

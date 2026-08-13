@@ -9,6 +9,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.content.BroadcastReceiver
 import android.content.Intent
@@ -44,6 +45,8 @@ class VoipEngine(
     private var pendingConnectedCallId: String? = null
     private var incomingRingtone: Ringtone? = null
     private var incomingVibrator: Vibrator? = null
+    private var outgoingRingbackTone: Ringtone? = null
+    private var outgoingToneGenerator: ToneGenerator? = null
     private val callerIdMap = mutableMapOf<String, String>()
 
     init {
@@ -374,7 +377,100 @@ class VoipEngine(
         return sipEngine.sendDtmf(callId, digits)
     }
 
-    fun startInAppRinging() {
+    fun startInAppRinging(isOutgoing: Boolean = false) {
+        val ctx = appContext
+        if (ctx == null) {
+            return
+        }
+        
+        if (isOutgoing) {
+            // Play ringback tone for outgoing calls
+            startOutgoingRingbackTone()
+        } else {
+            // Play ringtone for incoming calls
+            startIncomingRingtone()
+        }
+    }
+
+    private fun startOutgoingRingbackTone() {
+        val ctx = appContext
+        if (ctx == null) {
+            return
+        }
+        if (outgoingToneGenerator != null || outgoingRingbackTone != null) {
+            return
+        }
+        val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val ringerMode = audioManager.ringerMode
+        if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
+            return
+        }
+
+        // Set audio mode for outgoing call (use IN_COMMUNICATION to ensure voice path)
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        
+        // Ensure STREAM_VOICE_CALL volume is at maximum
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+        audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
+
+        if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            // Use ToneGenerator to play a 400 Hz ringback tone (international standard)
+            try {
+                val toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, ToneGenerator.MAX_VOLUME)
+                outgoingToneGenerator = toneGenerator
+                // Play 400 Hz for 1 second, then silence for 0.5 seconds (repeating pattern)
+                mainHandler.post {
+                    playRingbackTonePattern(toneGenerator)
+                }
+                Log.i(TAG, "Started outgoing ringback tone with 400 Hz pattern")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to create ToneGenerator for ringback tone: ${e.message}", e)
+                // Fallback to regular ringtone if ToneGenerator fails
+                try {
+                    val uri = RingtoneManager.getActualDefaultRingtoneUri(
+                        ctx,
+                        RingtoneManager.TYPE_RINGTONE
+                    )
+                    val ring = RingtoneManager.getRingtone(ctx, uri)
+                    if (ring != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            ring.audioAttributes = AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            ring.isLooping = true
+                        }
+                        outgoingRingbackTone = ring
+                        ring.play()
+                    }
+                } catch (e2: Exception) {
+                    Log.w(TAG, "Failed to fallback to ringtone: ${e2.message}", e2)
+                }
+            }
+        }
+    }
+
+    private fun playRingbackTonePattern(toneGenerator: ToneGenerator) {
+        // Ringback tone pattern: 400 Hz, 1 second ON, 0.5 second OFF, repeat
+        val pattern = Runnable {
+            try {
+                toneGenerator.startTone(ToneGenerator.TONE_CDMA_RINGBACK, 1000) // 1 second of 400Hz
+                mainHandler.postDelayed({
+                    // After 1 second, schedule next cycle
+                    if (outgoingToneGenerator != null) {
+                        playRingbackTonePattern(toneGenerator)
+                    }
+                }, 1500) // Wait 1 second (tone) + 0.5 second (silence) = 1.5 seconds
+            } catch (e: Exception) {
+                Log.w(TAG, "Error playing ringback tone pattern: ${e.message}")
+            }
+        }
+        mainHandler.post(pattern)
+    }
+
+    private fun startIncomingRingtone() {
         val ctx = appContext
         if (ctx == null) {
             return
@@ -396,7 +492,7 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_RING, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            // Use system ringback tone (depends on geographical region)
+            // Use system ringtone for incoming calls
             val uri = RingtoneManager.getActualDefaultRingtoneUri(
                 ctx,
                 RingtoneManager.TYPE_RINGTONE
@@ -441,6 +537,10 @@ class VoipEngine(
     fun stopInAppRinging() {
         incomingRingtone?.stop()
         incomingRingtone = null
+        outgoingRingbackTone?.stop()
+        outgoingRingbackTone = null
+        outgoingToneGenerator?.release()
+        outgoingToneGenerator = null
         incomingVibrator?.cancel()
         incomingVibrator = null
     }

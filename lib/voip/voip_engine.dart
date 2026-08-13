@@ -33,7 +33,7 @@ class VoipEngine {
   Future<void> acceptCall(String callId) =>
       _invoke('acceptCall', <String, dynamic>{'callId': callId});
 
-  Future<void> startInAppRinging() => _invoke('startInAppRinging');
+  Future<void> startInAppRinging({bool isOutgoing = false}) => _invoke('startInAppRinging', <String, dynamic>{'isOutgoing': isOutgoing});
 
   Future<void> stopInAppRinging() => _invoke('stopInAppRinging');
 

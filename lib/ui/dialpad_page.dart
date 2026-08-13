@@ -48,7 +48,8 @@ class _DialpadPageState extends State<DialpadPage> {
   List<Map<String, dynamic>> _contactResults = const [];
   List<Map<String, dynamic>> _dialpadSearchResults = const [];
   List<_CallHistoryEntry> _historyEntries = const [];
-  List<SavedContact> _savedContacts = const [];
+  List<SavedContact> _savedContacts = const []; // Favoris
+  List<SavedContact> _contactPageSavedContacts = const []; // Contacts sauvegardés depuis la page Contacts
   List<SavedContact> _favoritesSearchResults = const [];
   bool _isLoadingSavedContacts = false;
   String? _savedContactsError;
@@ -66,7 +67,8 @@ class _DialpadPageState extends State<DialpadPage> {
   void initState() {
     super.initState();
     _loadUsername();
-    _loadSavedContacts();
+    _loadSavedContacts(); // Charge les favoris
+    _loadContactPageSavedContacts(); // Charge les contacts de la page Contacts
     _listenRegistration();
     _registerOnStart();
     _listenFavoritesChanges();
@@ -102,7 +104,7 @@ class _DialpadPageState extends State<DialpadPage> {
       _savedContactsError = null;
     });
     try {
-      final contacts = await SavedContactsStore.load();
+      final contacts = await SavedContactsStore.load(isFavorites: true);
       if (!mounted) return;
       setState(() {
         _savedContacts = contacts;
@@ -114,6 +116,19 @@ class _DialpadPageState extends State<DialpadPage> {
         _savedContactsError = 'Erreur: $e';
         _isLoadingSavedContacts = false;
       });
+    }
+  }
+
+  Future<void> _loadContactPageSavedContacts() async {
+    try {
+      final contacts = await SavedContactsStore.load(isFavorites: false);
+      if (!mounted) return;
+      setState(() {
+        _contactPageSavedContacts = contacts;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      AppLogger.instance.log('Erreur chargement contacts: $e');
     }
   }
 
@@ -430,7 +445,7 @@ class _DialpadPageState extends State<DialpadPage> {
     _makeCall();
   }
 
-  Future<void> _addSavedContact(Map<String, dynamic> contact) async {
+  Future<void> _addSavedContact(Map<String, dynamic> contact, {bool notify = false, bool isFavorites = true}) async {
     final number = contact['telephoneNumber']?.toString().trim() ?? '';
     if (number.isEmpty) {
       _showMessage('Numéro introuvable pour ce contact.');
@@ -441,9 +456,15 @@ class _DialpadPageState extends State<DialpadPage> {
     try {
       final updated = await SavedContactsStore.add(
         SavedContact(name: name, number: number, ou: ou),
+        notify: notify,
+        isFavorites: isFavorites,
       );
       if (!mounted) return;
-      setState(() => _savedContacts = updated);
+      if (isFavorites) {
+        setState(() => _savedContacts = updated);
+      } else {
+        setState(() => _contactPageSavedContacts = updated);
+      }
       _showMessage('Contact ajouté.');
     } catch (e) {
       _showMessage('Erreur: $e');
@@ -464,7 +485,7 @@ class _DialpadPageState extends State<DialpadPage> {
     _makeCall();
   }
 
-  Future<void> _removeSavedContact(SavedContact contact) async {
+  Future<void> _removeSavedContact(SavedContact contact, {bool isFavorites = true}) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -490,9 +511,13 @@ class _DialpadPageState extends State<DialpadPage> {
     );
     if (confirmed != true) return;
     try {
-      final updated = await SavedContactsStore.removeByNumber(contact.number);
+      final updated = await SavedContactsStore.removeByNumber(contact.number, isFavorites: isFavorites);
       if (!mounted) return;
-      setState(() => _savedContacts = updated);
+      if (isFavorites) {
+        setState(() => _savedContacts = updated);
+      } else {
+        setState(() => _contactPageSavedContacts = updated);
+      }
       _showMessage('Contact supprimé.');
     } catch (e) {
       _showMessage('Erreur: $e');
@@ -502,7 +527,9 @@ class _DialpadPageState extends State<DialpadPage> {
   bool _isContactSaved(String number) {
     final normalized = number.trim();
     if (normalized.isEmpty) return false;
-    return _savedContacts.any((c) => c.number.trim() == normalized);
+    // Vérifier dans les favoris ET dans les contacts de la page Contacts
+    return _savedContacts.any((c) => c.number.trim() == normalized) ||
+           _contactPageSavedContacts.any((c) => c.number.trim() == normalized);
   }
 
   void _toggleContactSearch() {
@@ -662,8 +689,8 @@ class _DialpadPageState extends State<DialpadPage> {
                           title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
                           subtitle: Text(
                             contact.ou.isEmpty
-                                ? _formatNumberDisplay(contact.number)
-                                : '${contact.ou}\n${_formatNumberDisplay(contact.number)}',
+                                ? contact.number
+                                : '${contact.ou}\n${contact.number}',
                           ),
                           isThreeLine: contact.ou.isNotEmpty,
                           trailing: IconButton(
@@ -731,11 +758,10 @@ class _DialpadPageState extends State<DialpadPage> {
                                                 itemBuilder: (context, index) {
                                                   final contact = _savedContacts[index];
                                                   final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
-                                                  final displayNumber = _formatNumberDisplay(contact.number);
                                                   final subtitleParts = <String>[];
                                                   if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
-                                                  if (displayNumber.isNotEmpty) {
-                                                    subtitleParts.add(displayNumber);
+                                                  if (contact.number.isNotEmpty) {
+                                                    subtitleParts.add(contact.number);
                                                   }
                                                   return ListTile(
                                                     leading: const Icon(Icons.favorite),
@@ -764,11 +790,11 @@ class _DialpadPageState extends State<DialpadPage> {
                                       itemBuilder: (context, index) {
                                         final contact = _favoritesSearchResults[index];
                                         final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
-                                        final displayNumber = _formatNumberDisplay(contact.number);
+                                        final isSaved = _isContactSaved(contact.number);
                                         final subtitleParts = <String>[];
                                         if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
-                                        if (displayNumber.isNotEmpty) {
-                                          subtitleParts.add(displayNumber);
+                                        if (contact.number.isNotEmpty) {
+                                          subtitleParts.add(contact.number);
                                         }
                                         return ListTile(
                                           leading: const Icon(Icons.favorite),
@@ -778,9 +804,15 @@ class _DialpadPageState extends State<DialpadPage> {
                                               : Text(subtitleParts.join('\n')),
                                           isThreeLine: subtitleParts.length > 1,
                                           trailing: IconButton(
-                                            icon: const Icon(Icons.delete_outline),
-                                            tooltip: 'Supprimer',
-                                            onPressed: () => _removeSavedContact(contact),
+                                            icon: Icon(isSaved ? Icons.check : Icons.add),
+                                            tooltip: isSaved ? 'Déjà ajouté' : 'Ajouter',
+                                            onPressed: isSaved
+                                                ? null
+                                                : () => _addSavedContact({
+                                                      'telephoneNumber': contact.number,
+                                                      'name': contact.name,
+                                                      'ou': contact.ou,
+                                                    }, notify: true),
                                           ),
                                           onTap: () => _callSavedContact(contact),
                                         );
@@ -809,15 +841,6 @@ class _DialpadPageState extends State<DialpadPage> {
         });
         return;
       }
-      // If favorites are still loading, show message instead of searching
-      if (_isLoadingSavedContacts) {
-        if (!mounted) return;
-        setState(() {
-          _favoritesError = 'Favoris en cours de chargement...';
-          _favoritesSearchResults = const [];
-        });
-        return;
-      }
       _searchFavorites(queryOverride: query);
     });
   }
@@ -834,11 +857,12 @@ class _DialpadPageState extends State<DialpadPage> {
       return;
     }
 
-    // If favorites are still loading, don't search
-    if (_isLoadingSavedContacts) {
+    // Don't require 3 characters for favorites search (API will handle it)
+    if (query.length < 1) {
       if (!mounted) return;
       setState(() {
-        _favoritesError = 'Favoris en cours de chargement...';
+        _isSearchingFavorites = false;
+        _favoritesError = null;
         _favoritesSearchResults = const [];
       });
       return;
@@ -853,29 +877,69 @@ class _DialpadPageState extends State<DialpadPage> {
     });
 
     try {
-      // Recherche dans les contacts sauvegardés
-      final results = _savedContacts.where((contact) {
-        final name = contact.name.toLowerCase();
-        final number = contact.number.toLowerCase();
-        final ou = contact.ou.toLowerCase();
-        final queryLower = query.toLowerCase();
-        
-        // Recherche dans le nom, numéro complet ou les 5 premiers chiffres du numéro
-        final first5Digits = number.replaceAll(RegExp(r'[^0-9]'), '').length > 5
-            ? number.replaceAll(RegExp(r'[^0-9]'), '').substring(0, 5)
-            : number.replaceAll(RegExp(r'[^0-9]'), '');
-        
-        return name.contains(queryLower) || 
-               number.contains(queryLower) || 
-               first5Digits.contains(queryLower) ||
-               ou.contains(queryLower);
-      }).toList();
+      final response = await _apiClient.callProvisionedEndpoint(
+        endpoint: 'ldap/contacts',
+        params: {
+          'sn': query,
+        },
+        includeExtension: false,
+      );
+
+      if (!mounted) return;
+      if (requestId != _favoritesSearchRequestId) return;
+
+      if (!response.isOk) {
+        setState(() {
+          _favoritesError = response.message.isNotEmpty
+              ? response.message
+              : 'Erreur API';
+          _isSearchingFavorites = false;
+        });
+        return;
+      }
+
+      final decodedData = response.decodedData;
+      final apiContacts = <Map<String, dynamic>>[];
+      if (decodedData is List) {
+        for (final item in decodedData) {
+          if (item is Map) {
+            apiContacts.add(item.map((k, v) => MapEntry(k.toString(), v)));
+          }
+        }
+      }
+
+      // Convertir les résultats API en SavedContact et filtrer par nombre de chiffres
+      final favoriteResults = apiContacts
+          .map((contact) {
+            final name = (contact['displayName'] ?? contact['cn'] ?? 'Sans nom') as String;
+            final telephoneNumbers = <String>[];
+            if (contact['telephoneNumber'] is String) {
+              telephoneNumbers.add(contact['telephoneNumber']);
+            } else if (contact['telephoneNumber'] is List) {
+              telephoneNumbers.addAll((contact['telephoneNumber'] as List).cast<String>());
+            }
+
+            // Prendre le premier numéro trouvé
+            final number = telephoneNumbers.isNotEmpty ? telephoneNumbers.first : '';
+
+            return SavedContact(
+              name: name,
+              number: number,
+              ou: contact['ou'] ?? '',
+            );
+          })
+          .where((contact) {
+            // Filtrer: ne garder que les contacts avec 5 chiffres ou moins
+            final digitsOnly = contact.number.replaceAll(RegExp(r'[^0-9]'), '');
+            return digitsOnly.length <= 5;
+          })
+          .toList();
 
       if (!mounted) return;
       if (requestId != _favoritesSearchRequestId) return;
 
       setState(() {
-        _favoritesSearchResults = results;
+        _favoritesSearchResults = favoriteResults;
         _isSearchingFavorites = false;
       });
     } catch (e) {
@@ -940,18 +1004,13 @@ class _DialpadPageState extends State<DialpadPage> {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 6),
-                    if (_isLoadingSavedContacts)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: LinearProgressIndicator(minHeight: 2),
-                      )
-                    else if (_savedContacts.isEmpty)
+                    if (_contactPageSavedContacts.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 8),
                         child: Text('Aucun contact sauvegardé'),
                       )
                     else
-                      ..._savedContacts.map(
+                      ..._contactPageSavedContacts.map(
                         (contact) => ListTile(
                           leading: const Icon(Icons.person),
                           title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
@@ -964,7 +1023,7 @@ class _DialpadPageState extends State<DialpadPage> {
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline),
                             tooltip: 'Supprimer',
-                            onPressed: () => _removeSavedContact(contact),
+                            onPressed: () => _removeSavedContact(contact, isFavorites: false),
                           ),
                           onTap: () => _callSavedContact(contact),
                         ),
@@ -1042,7 +1101,7 @@ class _DialpadPageState extends State<DialpadPage> {
                                             tooltip: isSaved ? 'Déjà ajouté' : 'Ajouter',
                                             onPressed: isSaved
                                                 ? null
-                                                : () => _addSavedContact(contact),
+                                                : () => _addSavedContact(contact, isFavorites: false),
                                           ),
                                           onTap: () => _callContactFromContacts(contact),
                                         );

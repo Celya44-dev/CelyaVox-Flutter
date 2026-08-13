@@ -95,12 +95,14 @@ class SavedContactsNotifier {
 }
 
 class SavedContactsStore {
-  static const String _storageKey = 'saved_contacts_v1';
+  static const String _storageFavoritesKey = 'saved_contacts_favorites_v1';
+  static const String _storageContactsKey = 'saved_contacts_contacts_v1';
   static final _notifier = SavedContactsNotifier();
 
-  static Future<List<SavedContact>> load() async {
+  static Future<List<SavedContact>> load({bool isFavorites = true}) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_storageKey);
+    final storageKey = isFavorites ? _storageFavoritesKey : _storageContactsKey;
+    final raw = prefs.getString(storageKey);
     if (raw == null || raw.trim().isEmpty) return const [];
     try {
       final decoded = jsonDecode(raw);
@@ -116,16 +118,17 @@ class SavedContactsStore {
     }
   }
 
-  static Future<void> saveAll(List<SavedContact> contacts) async {
+  static Future<void> saveAll(List<SavedContact> contacts, {bool isFavorites = true}) async {
     final prefs = await SharedPreferences.getInstance();
+    final storageKey = isFavorites ? _storageFavoritesKey : _storageContactsKey;
     final encoded = jsonEncode(contacts.map((c) => c.toMap()).toList());
-    await prefs.setString(_storageKey, encoded);
+    await prefs.setString(storageKey, encoded);
   }
 
-  static Future<List<SavedContact>> add(SavedContact contact) async {
+  static Future<List<SavedContact>> add(SavedContact contact, {bool notify = false, bool isFavorites = true}) async {
     final normalizedNumber = contact.number.trim();
-    if (normalizedNumber.isEmpty) return load();
-    final current = await load();
+    if (normalizedNumber.isEmpty) return load(isFavorites: isFavorites);
+    final current = await load(isFavorites: isFavorites);
     final exists = current.any((c) => c.number.trim() == normalizedNumber);
     if (exists) return current;
     final updated = List<SavedContact>.from(current)..add(
@@ -135,27 +138,29 @@ class SavedContactsStore {
           ou: contact.ou.trim(),
         ),
       );
-    await saveAll(updated);
-    // Notifier les observateurs du nouvel ajout
-    final newContact = SavedContact(
-      name: contact.name.trim(),
-      number: normalizedNumber,
-      ou: contact.ou.trim(),
-    );
-    _notifier.notifyContactAdded(newContact);
+    await saveAll(updated, isFavorites: isFavorites);
+    // Notifier les observateurs du nouvel ajout seulement si demandé ET si c'est un favori
+    if (notify && isFavorites) {
+      final newContact = SavedContact(
+        name: contact.name.trim(),
+        number: normalizedNumber,
+        ou: contact.ou.trim(),
+      );
+      _notifier.notifyContactAdded(newContact);
+    }
     return updated;
   }
 
-  static Future<List<SavedContact>> removeByNumber(String number) async {
+  static Future<List<SavedContact>> removeByNumber(String number, {bool isFavorites = true}) async {
     final normalizedNumber = number.trim();
-    if (normalizedNumber.isEmpty) return load();
-    final current = await load();
+    if (normalizedNumber.isEmpty) return load(isFavorites: isFavorites);
+    final current = await load(isFavorites: isFavorites);
     final updated = current
         .where((contact) => contact.number.trim() != normalizedNumber)
         .toList();
-    await saveAll(updated);
-    // Notifier les observateurs de la suppression
-    if (current.any((c) => c.number.trim() == normalizedNumber)) {
+    await saveAll(updated, isFavorites: isFavorites);
+    // Notifier les observateurs de la suppression seulement si c'est un favori
+    if (isFavorites && current.any((c) => c.number.trim() == normalizedNumber)) {
       _notifier.notifyContactRemoved(normalizedNumber);
     }
     return updated;
