@@ -51,16 +51,24 @@ class BLFStateManager {
   /// Mettre à jour l'état d'un contact
   void updateState(String number, BLFState state) {
     final normalized = number.replaceAll(RegExp(r'[^0-9]'), '');
+    final oldState = _stateMap[normalized];
+    print('>>> BLFStateManager.updateState: number=$number, normalized=$normalized, oldState=$oldState, newState=$state');
     if (_stateMap[normalized] != state) {
       _stateMap[normalized] = state;
+      print('>>> State CHANGED - adding to stream');
       _stateController.add(BLFStateChanged(number: normalized, state: state));
+    } else {
+      print('>>> State NOT changed (same as old)');
     }
   }
   
   /// Traiter un événement de présence et mettre à jour les états
   void handlePresenceEvent(PresenceStateEvent event) {
+    print('>>> BLFStateManager.handlePresenceEvent: number=${event.number}, stateStr=${event.state}');
     final state = _parsePresenceState(event.state);
+    print('>>> Parsed state: $state');
     updateState(event.number, state);
+    print('>>> BLFStateManager.handlePresenceEvent: updateState done');
   }
   
   /// Convertir l'état de présence string en BLFState

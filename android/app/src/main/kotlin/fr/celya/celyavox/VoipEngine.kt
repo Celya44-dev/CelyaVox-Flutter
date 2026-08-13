@@ -143,18 +143,22 @@ class VoipEngine(
     }
 
     fun subscribePresence(contact: String) {
-        Log.i(TAG, "VoipEngine.subscribePresence contact=$contact")
+        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact")
         sipEngine.subscribePresence(contact)
+        Log.i(TAG, ">>> VoipEngine.subscribePresence DONE for $contact")
     }
 
     fun unsubscribePresence(contact: String) {
-        Log.i(TAG, "VoipEngine.unsubscribePresence contact=$contact")
+        Log.i(TAG, ">>> VoipEngine.unsubscribePresence: contact=$contact")
         sipEngine.unsubscribePresence(contact)
+        Log.i(TAG, ">>> VoipEngine.unsubscribePresence DONE for $contact")
     }
 
     fun getPresenceStatus(contact: String): String {
-        Log.i(TAG, "VoipEngine.getPresenceStatus contact=$contact")
-        return sipEngine.getPresenceStatus(contact)
+        Log.i(TAG, ">>> VoipEngine.getPresenceStatus: contact=$contact")
+        val status = sipEngine.getPresenceStatus(contact)
+        Log.i(TAG, ">>> VoipEngine.getPresenceStatus result: $contact -> $status")
+        return status
     }
 
     private fun initCallAudio() {

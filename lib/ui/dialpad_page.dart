@@ -114,12 +114,14 @@ class _DialpadPageState extends State<DialpadPage> {
   }
 
   Future<void> _loadSavedContacts() async {
+    print('>>> _loadSavedContacts START');
     setState(() {
       _isLoadingSavedContacts = true;
       _savedContactsError = null;
     });
     try {
       final contacts = await SavedContactsStore.load(isFavorites: true);
+      print('>>> Loaded ${contacts.length} saved contacts');
       if (!mounted) return;
       setState(() {
         _savedContacts = contacts;
@@ -128,12 +130,16 @@ class _DialpadPageState extends State<DialpadPage> {
       // Subscribe à la présence de tous les favoris
       for (final contact in contacts) {
         try {
+          print('>>> Subscribing to presence: ${contact.number}');
           await widget.engine.subscribePresence(contact.number);
+          print('>>> ✓ Subscribé à: ${contact.number}');
           AppLogger.instance.log('Subscribé à: ${contact.number}');
         } catch (e) {
+          print('>>> ✗ Erreur sub présence ${contact.number}: $e');
           AppLogger.instance.log('Erreur sub présence ${contact.number}: $e');
         }
       }
+      print('>>> _loadSavedContacts DONE');
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -254,10 +260,13 @@ class _DialpadPageState extends State<DialpadPage> {
   }
 
   void _listenPresenceEvents() {
+    print('>>> _listenPresenceEvents: Starting listener');
     _presenceSub = VoipEvents.stream.listen((event) {
       if (event is PresenceStateEvent && mounted) {
+        print('>>> PresenceStateEvent received: number=${event.number}, state=${event.state}');
         // Mettre à jour l'état BLF du contact
         BLFStateManager().handlePresenceEvent(event);
+        print('>>> Calling setState() to refresh UI');
         // Déclencher un refresh pour afficher les changements
         setState(() {});
       }
@@ -488,6 +497,7 @@ class _DialpadPageState extends State<DialpadPage> {
     }
     final name = contact['name']?.toString().trim() ?? '';
     final ou = contact['ou']?.toString().trim() ?? '';
+    print('>>> _addSavedContact: $name ($number), isFavorites=$isFavorites');
     try {
       final updated = await SavedContactsStore.add(
         SavedContact(name: name, number: number, ou: ou),
@@ -499,7 +509,9 @@ class _DialpadPageState extends State<DialpadPage> {
         setState(() => _savedContacts = updated);
         // Subscribe à la présence du contact favori
         try {
+          print('>>> Calling subscribePresence for new favorite: $number');
           await widget.engine.subscribePresence(number);
+          print('>>> ✓ Subscribé à la présence de: $number');
           AppLogger.instance.log('Subscribé à la présence de: $number');
         } catch (e) {
           AppLogger.instance.log('Erreur subscription présence: $e');
@@ -702,6 +714,9 @@ class _DialpadPageState extends State<DialpadPage> {
                       icon: const Icon(Icons.close),
                       onPressed: () {
                         _favoritesSearchController.clear();
+                        setState(() {
+                          _favoritesSearchResults = const [];
+                        });
                       },
                     )
                   : null,
@@ -745,23 +760,13 @@ class _DialpadPageState extends State<DialpadPage> {
                           final blfState = BLFStateManager().getState(contact.number);
                           final blfColor = BLFStateManager.getColorForState(blfState);
                           return ListTile(
-                            leading: Stack(
-                              children: [
-                                const Icon(Icons.favorite),
-                                Positioned(
-                                  bottom: 0,
-                                  right: 0,
-                                  child: Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color: blfColor,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: Colors.white, width: 1),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            leading: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: blfColor,
+                                shape: BoxShape.circle,
+                              ),
                             ),
                             title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
                             subtitle: Text(
@@ -844,23 +849,13 @@ class _DialpadPageState extends State<DialpadPage> {
                                                     subtitleParts.add(contact.number);
                                                   }
                                                   return ListTile(
-                                                    leading: Stack(
-                                                      children: [
-                                                        const Icon(Icons.favorite),
-                                                        Positioned(
-                                                          bottom: 0,
-                                                          right: 0,
-                                                          child: Container(
-                                                            width: 10,
-                                                            height: 10,
-                                                            decoration: BoxDecoration(
-                                                              color: blfColor,
-                                                              shape: BoxShape.circle,
-                                                              border: Border.all(color: Colors.white, width: 1),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ],
+                                                    leading: Container(
+                                                      width: 24,
+                                                      height: 24,
+                                                      decoration: BoxDecoration(
+                                                        color: blfColor,
+                                                        shape: BoxShape.circle,
+                                                      ),
                                                     ),
                                                     title: Text(name),
                                                     subtitle: subtitleParts.isEmpty
@@ -896,23 +891,13 @@ class _DialpadPageState extends State<DialpadPage> {
                                           subtitleParts.add(contact.number);
                                         }
                                         return ListTile(
-                                          leading: Stack(
-                                            children: [
-                                              const Icon(Icons.favorite),
-                                              Positioned(
-                                                bottom: 0,
-                                                right: 0,
-                                                child: Container(
-                                                  width: 10,
-                                                  height: 10,
-                                                  decoration: BoxDecoration(
-                                                    color: blfColor,
-                                                    shape: BoxShape.circle,
-                                                    border: Border.all(color: Colors.white, width: 1),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
+                                          leading: Container(
+                                            width: 24,
+                                            height: 24,
+                                            decoration: BoxDecoration(
+                                              color: blfColor,
+                                              shape: BoxShape.circle,
+                                            ),
                                           ),
                                           title: Text(name),
                                           subtitle: subtitleParts.isEmpty
@@ -1101,6 +1086,9 @@ class _DialpadPageState extends State<DialpadPage> {
                       icon: const Icon(Icons.close),
                       onPressed: () {
                         _contactSearchController.clear();
+                        setState(() {
+                          _contactResults = const [];
+                        });
                       },
                     )
                   : null,

@@ -160,23 +160,30 @@ class PjsipEngine private constructor() {
 
     @Synchronized
     fun subscribePresence(contact: String): Boolean {
+        Log.i(TAG, ">>> PjsipEngine.subscribePresence: contact=$contact, initialized=${initialized.get()}")
         if (!initialized.get()) init()
-        return nativeSubscribePresence(contact)
+        val result = nativeSubscribePresence(contact)
+        Log.i(TAG, ">>> PjsipEngine.subscribePresence result: $result")
+        return result
     }
 
     @Synchronized
     fun unsubscribePresence(contact: String): Boolean {
         if (!initialized.get()) {
-            Log.w(TAG, "unsubscribePresence ignored: engine not initialized")
+            Log.w(TAG, ">>> PjsipEngine.unsubscribePresence: engine not initialized")
             return false
         }
-        return nativeUnsubscribePresence(contact)
+        Log.i(TAG, ">>> PjsipEngine.unsubscribePresence: contact=$contact")
+        val result = nativeUnsubscribePresence(contact)
+        Log.i(TAG, ">>> PjsipEngine.unsubscribePresence result: $result")
+        return result
     }
 
     @Synchronized
     fun getPresenceStatus(contact: String): String {
+        Log.i(TAG, ">>> PjsipEngine.getPresenceStatus: contact=$contact, initialized=${initialized.get()}")
         if (!initialized.get()) {
-            Log.w(TAG, "getPresenceStatus ignored: engine not initialized")
+            Log.w(TAG, ">>> PjsipEngine.getPresenceStatus: engine not initialized")
             return "offline"
         }
         return nativeGetPresenceStatus(contact)

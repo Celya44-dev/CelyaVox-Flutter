@@ -161,17 +161,21 @@ class VoipMethodChannel(
                 }
                 "subscribePresence" -> {
                     val contact = requireArgument<String>(call, "contact")
+                    Log.i(TAG, ">>> VoipMethodChannel.subscribePresence: $contact")
                     engine.subscribePresence(contact)
                     result.success(null)
                 }
                 "unsubscribePresence" -> {
                     val contact = requireArgument<String>(call, "contact")
+                    Log.i(TAG, ">>> VoipMethodChannel.unsubscribePresence: $contact")
                     engine.unsubscribePresence(contact)
                     result.success(null)
                 }
                 "getPresenceStatus" -> {
                     val contact = requireArgument<String>(call, "contact")
+                    Log.i(TAG, ">>> VoipMethodChannel.getPresenceStatus: $contact")
                     val status = engine.getPresenceStatus(contact)
+                    Log.i(TAG, ">>> VoipMethodChannel.getPresenceStatus result: $status")
                     result.success(status)
                 }
                 else -> result.notImplemented()

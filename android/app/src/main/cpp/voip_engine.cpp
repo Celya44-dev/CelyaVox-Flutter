@@ -170,11 +170,12 @@ static void on_reg_state(pjsua_acc_id acc_id) {
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // Callback appelé quand l'état de présence d'un buddy change
     // PJSIP gère automatiquement les SUBSCRIBE/NOTIFY
-    LOGI("on_buddy_state: buddy_id=%d changed", buddy_id);
+    LOGI(">>> on_buddy_state CALLED: buddy_id=%d (PJSIP received NOTIFY from server)", buddy_id);
     
     // Émettre un événement pour notifier Dart
     char buf[32];
     pj_ansi_snprintf(buf, sizeof(buf), "%d", buddy_id);
+    LOGI(">>> Emitting presence_updated event with buddy_id=%d", buddy_id);
     emit_event("presence_updated", buf);
 }
 
@@ -519,17 +520,18 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     ensure_pj_thread_registered("jni");
     if (!ensure_endpoint()) return JNI_FALSE;
     if (g_acc_id == PJSUA_INVALID_ID) {
-        LOGW("nativeSubscribePresence: account not registered yet");
+        LOGW(">>> nativeSubscribePresence: account not registered yet");
         return JNI_FALSE;
     }
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
+    LOGI(">>> nativeSubscribePresence CALLED: contact=%s", contact_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Vérifier si déjà subscribé
     auto it = g_buddy_subscriptions.find(contact_str);
     if (it != g_buddy_subscriptions.end()) {
-        LOGI("nativeSubscribePresence: already subscribed to %s", contact_str);
+        LOGI(">>> nativeSubscribePresence: already subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return JNI_TRUE;
     }
@@ -544,14 +546,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_id buddy_id;
     pj_status_t status = pjsua_buddy_add(&buddy_cfg, &buddy_id);
     if (status != PJ_SUCCESS) {
-        LOGE("nativeSubscribePresence: pjsua_buddy_add failed for %s (status=%d)", contact_str, status);
+        LOGE(">>> nativeSubscribePresence: pjsua_buddy_add FAILED for %s (status=%d)", contact_str, status);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return JNI_FALSE;
     }
     
     // Tracker la subscription
     g_buddy_subscriptions[contact_str] = buddy_id;
-    LOGI("nativeSubscribePresence: subscribed to %s (buddy_id=%d, SUBSCRIBE envoyé au serveur)", contact_str, buddy_id);
+    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, sending SUBSCRIBE to server for: %s", buddy_id, contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     return JNI_TRUE;
@@ -563,12 +565,13 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     if (!ensure_endpoint()) return JNI_FALSE;
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
+    LOGI(">>> nativeUnsubscribePresence CALLED: contact=%s", contact_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Trouver et supprimer la subscription
     auto it = g_buddy_subscriptions.find(contact_str);
     if (it == g_buddy_subscriptions.end()) {
-        LOGW("nativeUnsubscribePresence: not subscribed to %s", contact_str);
+        LOGW(">>> nativeUnsubscribePresence: NOT subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return JNI_FALSE;
     }
@@ -579,14 +582,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     if (buddy_id >= 0) {
         pj_status_t status = pjsua_buddy_del(buddy_id);
         if (status != PJ_SUCCESS) {
-            LOGW("nativeUnsubscribePresence: pjsua_buddy_del failed for %s (status=%d)", contact_str, status);
+            LOGE(">>> nativeUnsubscribePresence: pjsua_buddy_del FAILED for %s (buddy_id=%d, status=%d)", contact_str, buddy_id, status);
         } else {
-            LOGI("nativeUnsubscribePresence: deleted buddy_id=%d (UNSUBSCRIBE envoyé au serveur)", buddy_id);
+            LOGI(">>> nativeUnsubscribePresence: pjsua_buddy_del SUCCESS buddy_id=%d (sending UNSUBSCRIBE to server)", buddy_id);
         }
     }
     
     g_buddy_subscriptions.erase(it);
-    LOGI("nativeUnsubscribePresence: unsubscribed from %s", contact_str);
+    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s", contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     return JNI_TRUE;
@@ -598,18 +601,20 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetPresenceStatus(JNIEnv *env, jobject,
     if (!ensure_endpoint()) return env->NewStringUTF("offline");
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
+    LOGI(">>> nativeGetPresenceStatus CALLED: contact=%s", contact_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Chercher le buddy_id
     auto it = g_buddy_subscriptions.find(contact_str);
     if (it == g_buddy_subscriptions.end()) {
-        LOGW("nativeGetPresenceStatus: not subscribed to %s", contact_str);
+        LOGW(">>> nativeGetPresenceStatus: NOT subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return env->NewStringUTF("offline");
     }
     
     pjsua_buddy_id buddy_id = it->second;
     if (buddy_id < 0) {
+        LOGW(">>> nativeGetPresenceStatus: invalid buddy_id for %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return env->NewStringUTF("offline");
     }
@@ -618,7 +623,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetPresenceStatus(JNIEnv *env, jobject,
     pjsua_buddy_info info;
     pj_status_t status = pjsua_buddy_get_info(buddy_id, &info);
     if (status != PJ_SUCCESS) {
-        LOGE("nativeGetPresenceStatus: pjsua_buddy_get_info failed for buddy_id=%d", buddy_id);
+        LOGE(">>> nativeGetPresenceStatus: pjsua_buddy_get_info FAILED for buddy_id=%d", buddy_id);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return env->NewStringUTF("offline");
     }
@@ -633,7 +638,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetPresenceStatus(JNIEnv *env, jobject,
         result = "available";
     }
     
-    LOGI("nativeGetPresenceStatus: buddy_id=%d, contact=%s, status=%s", buddy_id, contact_str, result);
+    LOGI(">>> nativeGetPresenceStatus: buddy_id=%d, contact=%s, sub_state=%d, result=%s", buddy_id, contact_str, info.sub_state, result);
     jstring jresult = env->NewStringUTF(result);
     env->ReleaseStringUTFChars(jcontact, contact_str);
     return jresult;
