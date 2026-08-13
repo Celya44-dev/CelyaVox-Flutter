@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../contacts/saved_contacts_store.dart';
@@ -247,8 +248,18 @@ class _InCallPageState extends State<InCallPage> {
   Future<void> _hangup() async {
     setState(() => _isHangingUp = true);
     final callId = _activeCallId.isNotEmpty ? _activeCallId : widget.callId;
+    AppLogger.instance.log('>>> _hangup: Attempting to hangup callId=$callId');
+    if (callId.isEmpty) {
+      AppLogger.instance.log('ERROR: _hangup called but callId is empty!');
+      _showMessage('Erreur: ID d\'appel manquant, impossible de raccrocher');
+      if (mounted) {
+        setState(() => _isHangingUp = false);
+      }
+      return;
+    }
     try {
       await widget.engine.hangupCall(callId);
+      AppLogger.instance.log('>>> _hangup: SUCCESS - BYE should be sent');
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
@@ -256,7 +267,11 @@ class _InCallPageState extends State<InCallPage> {
         ),
         (_) => false,
       );
+    } on PlatformException catch (e) {
+      AppLogger.instance.log('ERROR: _hangup failed with PlatformException: code=${e.code}, message=${e.message}');
+      _showMessage('Erreur raccroachage: ${e.message}');
     } catch (e) {
+      AppLogger.instance.log('ERROR: _hangup failed with exception: $e');
       _showMessage('Erreur: $e');
     } finally {
       if (mounted) {

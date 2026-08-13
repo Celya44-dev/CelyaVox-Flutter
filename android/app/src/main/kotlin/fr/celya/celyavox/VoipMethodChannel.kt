@@ -156,14 +156,17 @@ class VoipMethodChannel(
                 }
                 "hangupCall" -> {
                     val callId = requireArgument<String>(call, "callId")
-                    engine.endCall(callId)
+                    val ok = engine.endCall(callId)
+                    if (!ok) {
+                        result.error("HANGUP_FAILED", "Failed to hangup call $callId - BYE not sent", null)
+                        return
+                    }
                     result.success(null)
                 }
                 "subscribePresence" -> {
                     val contact = requireArgument<String>(call, "contact")
-                    val prefix = call.argument<String>("prefix") ?: ""
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact, prefix=$prefix")
-                    engine.subscribePresence(contact, prefix)
+                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact")
+                    engine.subscribePresence(contact)
                     result.success(null)
                 }
                 "unsubscribePresence" -> {

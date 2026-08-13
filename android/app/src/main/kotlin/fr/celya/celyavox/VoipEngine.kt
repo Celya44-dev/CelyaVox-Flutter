@@ -107,9 +107,12 @@ class VoipEngine(
         return sipEngine.makeCall(callee)
     }
 
-    fun endCall(callId: String) {
+    fun endCall(callId: String): Boolean {
         val ok = sipEngine.hangupCall(callId)
         Log.i(TAG, "VoipEngine.endCall callId=$callId ok=$ok")
+        if (!ok) {
+            Log.e(TAG, "ERROR: hangupCall failed for callId=$callId - BYE may not be sent!")
+        }
         appContext?.let { ctx ->
             stopInAppRinging()
             VoipForegroundService.stop(ctx)
@@ -133,6 +136,7 @@ class VoipEngine(
                 Log.w(TAG, "Failed to dispatch ACTION_CALL_TERMINATE_REQUESTED intent", e)
             }
         }
+        return ok
     }
 
     fun acceptCall(callId: String) {
@@ -711,6 +715,35 @@ class VoipEngine(
                     handleCallCancelled(ctx, message)
                 } else {
                     Log.w(TAG, "appContext is null, cannot handle call cancellation")
+                }
+            }
+            "presence_updated" -> {
+                // Message format: "buddy_id:status"
+                Log.i(TAG, ">>> presence_updated event: message=$message")
+                val parts = message.split(":", limit = 2)
+                if (parts.size == 2) {
+                    val buddyIdStr = parts[0]
+                    val status = parts[1]
+                    val buddyId = buddyIdStr.toIntOrNull() ?: -1
+                    if (buddyId >= 0) {
+                        val contact = sipEngine.getContactForBuddy(buddyId)
+                        Log.i(TAG, ">>> presence_updated: buddy_id=$buddyId → contact=$contact, status=$status")
+                        if (contact.isNotEmpty()) {
+                            emit(
+                                mapOf(
+                                    "type" to "presence_state",
+                                    "number" to contact,
+                                    "state" to status,
+                                )
+                            )
+                        } else {
+                            Log.w(TAG, ">>> presence_updated: contact empty for buddy_id=$buddyId")
+                        }
+                    } else {
+                        Log.w(TAG, ">>> presence_updated: invalid buddy_id=$buddyIdStr")
+                    }
+                } else {
+                    Log.w(TAG, ">>> presence_updated: invalid format, expected 'buddy_id:status', got '$message'")
                 }
             }
             else -> {

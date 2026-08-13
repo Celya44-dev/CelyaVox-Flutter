@@ -116,6 +116,15 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
         emit_event("call_ringing", std::to_string(call_id).c_str());
     } else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
         LOGI("Call DISCONNECTED - call_id=%d, status=%d", call_id, ci.last_status);
+        // Disconnect audio streams when call ends
+        for (unsigned i = 0; i < ci.media_cnt; ++i) {
+            if (ci.media[i].type == PJMEDIA_TYPE_AUDIO && ci.media[i].status == PJSUA_CALL_MEDIA_ACTIVE) {
+                const pjsua_conf_port_id slot = ci.media[i].stream.aud.conf_slot;
+                LOGI("Disconnecting audio for call %d, slot %d", call_id, slot);
+                pjsua_conf_disconnect(slot, 0);
+                pjsua_conf_disconnect(0, slot);
+            }
+        }
         std::string reason;
         reason += std::to_string(ci.last_status);
         reason += " ";
@@ -484,7 +493,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeHangupCall(JNIEnv *env, jobject, jstrin
         LOGE("hangup failed: unknown call_id=%d", call_id);
         return JNI_FALSE;
     }
-    pj_status_t status = pjsua_call_hangup(call_id, 0, nullptr, nullptr);
+    pj_status_t status = pjsua_call_hangup(call_id, 480, nullptr, nullptr);
     if (status != PJ_SUCCESS) {
         LOGE("hangup failed: %d", status);
         return JNI_FALSE;
