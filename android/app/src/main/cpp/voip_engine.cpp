@@ -106,6 +106,10 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
         LOGI("Call CONFIRMED - call_id=%d, media_cnt=%u", call_id, ci.media_cnt);
         emit_event("call_connected", std::to_string(call_id).c_str());
+    } else if (ci.state == PJSIP_INV_STATE_CALLING || ci.state == PJSIP_INV_STATE_EARLY) {
+        // Outgoing call is ringing (180 Ringing or 183 Session Progress)
+        LOGI("Call RINGING - call_id=%d, state=%d", call_id, ci.state);
+        emit_event("call_ringing", std::to_string(call_id).c_str());
     } else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
         LOGI("Call DISCONNECTED - call_id=%d, status=%d", call_id, ci.last_status);
         std::string reason;
@@ -115,7 +119,7 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
         std::string payload = std::to_string(call_id) + "|" + reason;
         emit_event("call_ended", payload.c_str());
     } else {
-        LOGI("Call state change - call_id=%d, state=%d (not CONFIRMED/DISCONNECTED)", call_id, ci.state);
+        LOGI("Call state change - call_id=%d, state=%d (not CONFIRMED/EARLY/DISCONNECTED)", call_id, ci.state);
     }
 }
 

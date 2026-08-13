@@ -134,7 +134,13 @@ class _InCallPageState extends State<InCallPage> {
 
   void _listenCallUpdates() {
     _eventsSub = VoipEvents.stream.listen((event) {
-      if (event is CallConnectedEvent) {
+      if (event is CallRingingEvent) {
+        // Outgoing call is ringing (remote party is receiving the call)
+        if (mounted) {
+          _startRinging();
+        }
+      } else if (event is CallConnectedEvent) {
+        _stopRinging();
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
             _activeCallId = event.callId;
@@ -149,6 +155,7 @@ class _InCallPageState extends State<InCallPage> {
           setState(() => _activeCallId = event.callId);
         }
       } else if (event is CallEndedEvent) {
+        _stopRinging();
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(

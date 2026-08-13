@@ -29,31 +29,38 @@ class DialpadPage extends StatefulWidget {
 class _DialpadPageState extends State<DialpadPage> {
   final TextEditingController _controller = TextEditingController();
   final TextEditingController _contactSearchController = TextEditingController();
+  final TextEditingController _favoritesSearchController = TextEditingController();
   final CelyaVoxApiClient _apiClient = CelyaVoxApiClient();
   bool _isCalling = false;
   bool _isRegistered = false;
   bool _isOpeningInCall = false;
   bool _showContactSearch = false;
   bool _isSearchingContacts = false;
+  bool _isSearchingFavorites = false;
   bool _isLoadingHistory = false;
   bool _historyLoaded = false;
   int _selectedIndex = 2;
   String? _username;
   String? _contactsError;
+  String? _favoritesError;
   String? _dialpadSearchError;
   String? _historyError;
   List<Map<String, dynamic>> _contactResults = const [];
   List<Map<String, dynamic>> _dialpadSearchResults = const [];
   List<_CallHistoryEntry> _historyEntries = const [];
   List<SavedContact> _savedContacts = const [];
+  List<SavedContact> _favoritesSearchResults = const [];
   bool _isLoadingSavedContacts = false;
   String? _savedContactsError;
   StreamSubscription<VoipEvent>? _eventsSub;
   Timer? _contactSearchDebounce;
   Timer? _dialpadSearchDebounce;
+  Timer? _favoritesSearchDebounce;
   int _contactSearchRequestId = 0;
   int _dialpadSearchRequestId = 0;
+  int _favoritesSearchRequestId = 0;
   bool _isSearchingDialpad = false;
+  StreamSubscription<SavedContactsEvent>? _favoritesChangesSub;
 
   @override
   void initState() {
@@ -62,15 +69,19 @@ class _DialpadPageState extends State<DialpadPage> {
     _loadSavedContacts();
     _listenRegistration();
     _registerOnStart();
+    _listenFavoritesChanges();
   }
 
   @override
   void dispose() {
     _eventsSub?.cancel();
+    _favoritesChangesSub?.cancel();
     _contactSearchDebounce?.cancel();
     _dialpadSearchDebounce?.cancel();
+    _favoritesSearchDebounce?.cancel();
     _controller.dispose();
     _contactSearchController.dispose();
+    _favoritesSearchController.dispose();
     super.dispose();
   }
 
@@ -162,6 +173,44 @@ class _DialpadPageState extends State<DialpadPage> {
       }
     }, onError: (_) {
       if (mounted) setState(() => _isRegistered = false);
+    });
+  }
+
+  Future<void> _registerOnStart() async {
+    try {
+      await widget.engine.registerProvisioned();
+    } catch (_) {
+      // Ignore errors here; registration status is reflected via events.
+    }
+  }
+
+  void _listenFavoritesChanges() {
+    _favoritesChangesSub = SavedContactsStore.notifier.subscribe((event) {
+      if (!mounted) return;
+      
+      if (event is SavedContactAdded) {
+        // Recharger les contacts sauvegardés
+        _loadSavedContacts();
+        // Réappliquer la recherche si active
+        if (_favoritesSearchController.text.isNotEmpty) {
+          _searchFavorites(queryOverride: _favoritesSearchController.text);
+        }
+      } else if (event is SavedContactRemoved) {
+        // Recharger les contacts sauvegardés
+        _loadSavedContacts();
+        // Mettre à jour les résultats de recherche
+        setState(() {
+          _favoritesSearchResults = _favoritesSearchResults
+              .where((contact) => contact.number.trim() != event.number)
+              .toList();
+        });
+      } else if (event is SavedContactsCleared) {
+        // Recharger les contacts sauvegardés
+        _loadSavedContacts();
+        setState(() {
+          _favoritesSearchResults = const [];
+        });
+      }
     });
   }
 
@@ -564,6 +613,241 @@ class _DialpadPageState extends State<DialpadPage> {
     }
   }
 
+  Widget _buildFavoritesTab() {
+    final query = _favoritesSearchController.text.trim();
+    final showOverlay = _isSearchingFavorites || _favoritesError != null || query.length >= 1;
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _favoritesSearchController,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Recherche favoris',
+              hintText: 'Tapez le nom ou les 5 premiers chiffres',
+              prefixIcon: Icon(Icons.search),
+            ),
+            textInputAction: TextInputAction.search,
+            onChanged: _onFavoritesSearchChanged,
+            onSubmitted: (_) => _searchFavorites(),
+          ),
+          const SizedBox(height: 12),
+          if (_favoritesError != null)
+            Text(
+              _favoritesError!,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Stack(
+              children: [
+                ListView(
+                  children: [
+                    const Text(
+                      'Contacts sauvegardés',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    if (_isLoadingSavedContacts)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: LinearProgressIndicator(minHeight: 2),
+                      )
+                    else if (_savedContacts.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Text('Aucun contact sauvegardé'),
+                      )
+                    else
+                      ..._savedContacts.map(
+                        (contact) => ListTile(
+                          leading: const Icon(Icons.favorite),
+                          title: Text(contact.name.isEmpty ? 'Sans nom' : contact.name),
+                          subtitle: Text(
+                            contact.ou.isEmpty
+                                ? _formatNumberDisplay(contact.number)
+                                : '${contact.ou}\n${_formatNumberDisplay(contact.number)}',
+                          ),
+                          isThreeLine: contact.ou.isNotEmpty,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Supprimer',
+                            onPressed: () => _removeSavedContact(contact),
+                          ),
+                          onTap: () => _callSavedContact(contact),
+                        ),
+                      ),
+                  ],
+                ),
+                if (showOverlay)
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      constraints: const BoxConstraints(maxHeight: 260),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: _isSearchingFavorites
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: LinearProgressIndicator(minHeight: 2),
+                            )
+                          : _favoritesError != null
+                              ? Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(
+                                    _favoritesError!,
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                                )
+                              : _favoritesSearchResults.isEmpty
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: Text('Aucun favori trouvé'),
+                                    )
+                                  : ListView.separated(
+                                      itemCount: _favoritesSearchResults.length,
+                                      shrinkWrap: true,
+                                      separatorBuilder: (_, __) =>
+                                          const Divider(height: 1),
+                                      itemBuilder: (context, index) {
+                                        final contact = _favoritesSearchResults[index];
+                                        final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
+                                        final displayNumber = _formatNumberDisplay(contact.number);
+                                        final subtitleParts = <String>[];
+                                        if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
+                                        if (displayNumber.isNotEmpty) {
+                                          subtitleParts.add(displayNumber);
+                                        }
+                                        return ListTile(
+                                          leading: const Icon(Icons.favorite),
+                                          title: Text(name),
+                                          subtitle: subtitleParts.isEmpty
+                                              ? null
+                                              : Text(subtitleParts.join('\n')),
+                                          isThreeLine: subtitleParts.length > 1,
+                                          trailing: IconButton(
+                                            icon: const Icon(Icons.delete_outline),
+                                            tooltip: 'Supprimer',
+                                            onPressed: () => _removeSavedContact(contact),
+                                          ),
+                                          onTap: () => _callSavedContact(contact),
+                                        );
+                                      },
+                                    ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onFavoritesSearchChanged(String value) {
+    _favoritesSearchDebounce?.cancel();
+    _favoritesSearchDebounce = Timer(const Duration(milliseconds: 300), () {
+      final query = value.trim();
+      if (query.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _isSearchingFavorites = false;
+          _favoritesError = null;
+          _favoritesSearchResults = const [];
+        });
+        return;
+      }
+      _searchFavorites(queryOverride: query);
+    });
+  }
+
+  Future<void> _searchFavorites({String? queryOverride}) async {
+    final query = (queryOverride ?? _favoritesSearchController.text).trim();
+    if (query.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isSearchingFavorites = false;
+        _favoritesError = null;
+        _favoritesSearchResults = const [];
+      });
+      return;
+    }
+
+    final requestId = ++_favoritesSearchRequestId;
+
+    setState(() {
+      _isSearchingFavorites = true;
+      _favoritesError = null;
+      _favoritesSearchResults = const [];
+    });
+
+    try {
+      // Recherche dans les contacts sauvegardés
+      final results = _savedContacts.where((contact) {
+        final name = contact.name.toLowerCase();
+        final number = contact.number.toLowerCase();
+        final ou = contact.ou.toLowerCase();
+        final queryLower = query.toLowerCase();
+        
+        // Recherche dans le nom, numéro complet ou les 5 premiers chiffres du numéro
+        final first5Digits = number.replaceAll(RegExp(r'[^0-9]'), '').length > 5
+            ? number.replaceAll(RegExp(r'[^0-9]'), '').substring(0, 5)
+            : number.replaceAll(RegExp(r'[^0-9]'), '');
+        
+        return name.contains(queryLower) || 
+               number.contains(queryLower) || 
+               first5Digits.contains(queryLower) ||
+               ou.contains(queryLower);
+      }).toList();
+
+      if (!mounted) return;
+      if (requestId != _favoritesSearchRequestId) return;
+
+      setState(() {
+        _favoritesSearchResults = results;
+        _isSearchingFavorites = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (requestId != _favoritesSearchRequestId) return;
+      setState(() {
+        _favoritesError = 'Erreur: $e';
+        _isSearchingFavorites = false;
+      });
+    }
+  }
+
+  String _formatNumberDisplay(String number) {
+    if (number.isEmpty) return number;
+    // Extraire les chiffres
+    final digitsOnly = number.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digitsOnly.length <= 5) {
+      return number;
+    }
+    // Limiter à 5 chiffres
+    return digitsOnly.substring(0, 5);
+  }
+
   Widget _buildContactsTab() {
     final query = _contactSearchController.text.trim();
     final showOverlay =
@@ -907,10 +1191,7 @@ class _DialpadPageState extends State<DialpadPage> {
         ],
       ),
       body: switch (_selectedIndex) {
-        0 => const _MenuPlaceholder(
-            icon: Icons.star,
-            title: 'Favoris',
-          ),
+        0 => _buildFavoritesTab(),
         1 => _buildHistoryTab(),
         2 => Padding(
             padding: const EdgeInsets.all(16),

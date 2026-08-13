@@ -524,6 +524,15 @@ class VoipEngine(
                     )
                 )
             }
+            "call_ringing" -> {
+                Log.i(TAG, "Call RINGING - callId=$message")
+                emit(
+                    mapOf(
+                        "type" to "call_ringing",
+                        "callId" to message,
+                    )
+                )
+            }
             "call_connected" -> {
                 VoipConnectionService.markCallActive(message)
                 // Reset FCM wakeup flag since call is now accepted and active

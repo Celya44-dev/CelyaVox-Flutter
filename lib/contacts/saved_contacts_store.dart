@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,8 +31,72 @@ class SavedContact {
   }
 }
 
+/// Événement de changement pour les favoris
+abstract class SavedContactsEvent {
+  const SavedContactsEvent();
+}
+
+class SavedContactAdded extends SavedContactsEvent {
+  const SavedContactAdded(this.contact);
+  final SavedContact contact;
+}
+
+class SavedContactRemoved extends SavedContactsEvent {
+  const SavedContactRemoved(this.number);
+  final String number;
+}
+
+class SavedContactsCleared extends SavedContactsEvent {
+  const SavedContactsCleared();
+}
+
+/// Gestionnaire centralisé pour les favoris avec système Subscribe/Notify
+class SavedContactsNotifier {
+  static final SavedContactsNotifier _instance = SavedContactsNotifier._internal();
+  
+  factory SavedContactsNotifier() {
+    return _instance;
+  }
+  
+  SavedContactsNotifier._internal();
+  
+  final StreamController<SavedContactsEvent> _eventController = 
+      StreamController<SavedContactsEvent>.broadcast();
+  
+  /// Stream des événements de changement des favoris
+  Stream<SavedContactsEvent> get eventStream => _eventController.stream;
+  
+  /// S'abonner aux changements des favoris
+  StreamSubscription<SavedContactsEvent> subscribe(
+    void Function(SavedContactsEvent) onEvent,
+  ) {
+    return _eventController.stream.listen(onEvent);
+  }
+  
+  /// Notifier les observateurs qu'un contact a été ajouté
+  void notifyContactAdded(SavedContact contact) {
+    _eventController.add(SavedContactAdded(contact));
+  }
+  
+  /// Notifier les observateurs qu'un contact a été supprimé
+  void notifyContactRemoved(String number) {
+    _eventController.add(SavedContactRemoved(number));
+  }
+  
+  /// Notifier les observateurs que les favoris ont été effacés
+  void notifyContactsCleared() {
+    _eventController.add(const SavedContactsCleared());
+  }
+  
+  /// Fermer le stream (généralement appelé à la fin de l'app)
+  void dispose() {
+    _eventController.close();
+  }
+}
+
 class SavedContactsStore {
   static const String _storageKey = 'saved_contacts_v1';
+  static final _notifier = SavedContactsNotifier();
 
   static Future<List<SavedContact>> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -71,6 +136,13 @@ class SavedContactsStore {
         ),
       );
     await saveAll(updated);
+    // Notifier les observateurs du nouvel ajout
+    final newContact = SavedContact(
+      name: contact.name.trim(),
+      number: normalizedNumber,
+      ou: contact.ou.trim(),
+    );
+    _notifier.notifyContactAdded(newContact);
     return updated;
   }
 
@@ -82,6 +154,13 @@ class SavedContactsStore {
         .where((contact) => contact.number.trim() != normalizedNumber)
         .toList();
     await saveAll(updated);
+    // Notifier les observateurs de la suppression
+    if (current.any((c) => c.number.trim() == normalizedNumber)) {
+      _notifier.notifyContactRemoved(normalizedNumber);
+    }
     return updated;
   }
+
+  /// Accéder au notifier pour s'abonner aux changements
+  static SavedContactsNotifier get notifier => _notifier;
 }

@@ -33,6 +33,10 @@ sealed class VoipEvent {
         return OutgoingCallEvent(
           callId: map['callId'] as String? ?? '',
         );
+      case 'call_ringing':
+        return CallRingingEvent(
+          callId: map['callId'] as String? ?? '',
+        );
       case 'call_ended':
         return CallEndedEvent(
           callId: map['callId'] as String? ?? '',
@@ -77,6 +81,12 @@ class OutgoingCallEvent extends VoipEvent {
   final String callId;
 
   const OutgoingCallEvent({required this.callId});
+}
+
+class CallRingingEvent extends VoipEvent {
+  final String callId;
+
+  const CallRingingEvent({required this.callId});
 }
 
 class CallEndedEvent extends VoipEvent {
