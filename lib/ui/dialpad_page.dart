@@ -712,10 +712,50 @@ class _DialpadPageState extends State<DialpadPage> {
                                   ),
                                 )
                               : _favoritesSearchResults.isEmpty
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(12),
-                                      child: Text('Aucun favori trouvé'),
-                                    )
+                                  ? _savedContacts.isEmpty
+                                      ? const Padding(
+                                          padding: EdgeInsets.all(12),
+                                          child: Text('Aucun contact sauvegardé'),
+                                        )
+                                      : Column(
+                                          children: [
+                                            const Padding(
+                                              padding: EdgeInsets.all(12),
+                                              child: Text('Aucun favori trouvé. Voici tous vos favoris :'),
+                                            ),
+                                            Expanded(
+                                              child: ListView.separated(
+                                                itemCount: _savedContacts.length,
+                                                separatorBuilder: (_, __) =>
+                                                    const Divider(height: 1),
+                                                itemBuilder: (context, index) {
+                                                  final contact = _savedContacts[index];
+                                                  final name = contact.name.isEmpty ? 'Sans nom' : contact.name;
+                                                  final displayNumber = _formatNumberDisplay(contact.number);
+                                                  final subtitleParts = <String>[];
+                                                  if (contact.ou.isNotEmpty) subtitleParts.add(contact.ou);
+                                                  if (displayNumber.isNotEmpty) {
+                                                    subtitleParts.add(displayNumber);
+                                                  }
+                                                  return ListTile(
+                                                    leading: const Icon(Icons.favorite),
+                                                    title: Text(name),
+                                                    subtitle: subtitleParts.isEmpty
+                                                        ? null
+                                                        : Text(subtitleParts.join('\n')),
+                                                    isThreeLine: subtitleParts.length > 1,
+                                                    trailing: IconButton(
+                                                      icon: const Icon(Icons.delete_outline),
+                                                      tooltip: 'Supprimer',
+                                                      onPressed: () => _removeSavedContact(contact),
+                                                    ),
+                                                    onTap: () => _callSavedContact(contact),
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          ],
+                                        )
                                   : ListView.separated(
                                       itemCount: _favoritesSearchResults.length,
                                       shrinkWrap: true,
@@ -769,6 +809,15 @@ class _DialpadPageState extends State<DialpadPage> {
         });
         return;
       }
+      // If favorites are still loading, show message instead of searching
+      if (_isLoadingSavedContacts) {
+        if (!mounted) return;
+        setState(() {
+          _favoritesError = 'Favoris en cours de chargement...';
+          _favoritesSearchResults = const [];
+        });
+        return;
+      }
       _searchFavorites(queryOverride: query);
     });
   }
@@ -780,6 +829,16 @@ class _DialpadPageState extends State<DialpadPage> {
       setState(() {
         _isSearchingFavorites = false;
         _favoritesError = null;
+        _favoritesSearchResults = const [];
+      });
+      return;
+    }
+
+    // If favorites are still loading, don't search
+    if (_isLoadingSavedContacts) {
+      if (!mounted) return;
+      setState(() {
+        _favoritesError = 'Favoris en cours de chargement...';
         _favoritesSearchResults = const [];
       });
       return;

@@ -396,6 +396,7 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_RING, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            // Use system ringback tone (depends on geographical region)
             val uri = RingtoneManager.getActualDefaultRingtoneUri(
                 ctx,
                 RingtoneManager.TYPE_RINGTONE
