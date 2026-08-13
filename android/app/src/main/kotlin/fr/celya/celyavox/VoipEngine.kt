@@ -7,6 +7,8 @@ import android.media.AudioManager
 import android.media.AudioDeviceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -22,6 +24,8 @@ import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlin.math.sin
+import kotlin.math.PI
 
 /**
  * Bridges Flutter to native PJSIP and ConnectionService, relaying events via EventChannel.
@@ -44,7 +48,9 @@ class VoipEngine(
     private var pendingConnectedCallId: String? = null
     private var incomingRingtone: Ringtone? = null
     private var incomingVibrator: Vibrator? = null
-    private var outgoingRingbackTone: Ringtone? = null
+    private var ringbackAudioTrack: AudioTrack? = null
+    private var ringbackPlaybackThread: Thread? = null
+    private var ringbackShouldPlay: Boolean = false
     private val callerIdMap = mutableMapOf<String, String>()
 
     init {
@@ -414,7 +420,7 @@ class VoipEngine(
         if (ctx == null) {
             return
         }
-        if (outgoingRingbackTone != null) {
+        if (ringbackAudioTrack != null || ringbackPlaybackThread != null) {
             return
         }
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -423,7 +429,7 @@ class VoipEngine(
             return
         }
 
-        // Set audio mode for outgoing call (use IN_COMMUNICATION to ensure voice path)
+        // Set audio mode for outgoing call
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         
         // Ensure STREAM_VOICE_CALL volume is at maximum
@@ -431,30 +437,83 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            // Use system ringtone for outgoing calls, but play it on STREAM_VOICE_CALL
             try {
-                val uri = RingtoneManager.getActualDefaultRingtoneUri(
-                    ctx,
-                    RingtoneManager.TYPE_RINGTONE
-                )
-                val ring = RingtoneManager.getRingtone(ctx, uri)
-                if (ring != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        ring.audioAttributes = AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        ring.isLooping = true
-                    }
-                    outgoingRingbackTone = ring
-                    ring.play()
-                    Log.i(TAG, "Started outgoing ringback tone (system ringtone on STREAM_VOICE_CALL)")
-                }
+                // Generate 400 Hz ringback tone synthetically (international standard)
+                ringbackShouldPlay = true
+                ringbackPlaybackThread = Thread {
+                    playRingbackToneSynthetic()
+                }.apply { start() }
+                Log.i(TAG, "Started outgoing ringback tone (400 Hz synthetic)")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to start outgoing ringback tone: ${e.message}", e)
+                Log.w(TAG, "Failed to start ringback tone: ${e.message}", e)
+                ringbackShouldPlay = false
             }
+        }
+    }
+
+    private fun playRingbackToneSynthetic() {
+        try {
+            val sampleRate = 44100 // Hz
+            val frequency = 400.0 // Hz (standard ringback tone)
+            val durationMs = 1000 // 1 second ON
+            val silenceDurationMs = 500 // 0.5 second OFF
+            val toneSamples = (sampleRate * durationMs / 1000).toInt()
+            val silenceSamples = (sampleRate * silenceDurationMs / 1000).toInt()
+            
+            val audioFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            } else {
+                AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            }
+            
+            val bufferSize = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            
+            ringbackAudioTrack = AudioTrack(
+                audioAttributes,
+                audioFormat,
+                bufferSize,
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            ).apply { play() }
+            
+            val toneBuffer = ShortArray(toneSamples)
+            val silenceBuffer = ShortArray(silenceSamples)
+            
+            // Generate 400 Hz sine wave
+            for (i in 0 until toneSamples) {
+                val sample = (Short.MAX_VALUE * sin(2 * PI * frequency * i / sampleRate)).toShort()
+                toneBuffer[i] = sample
+            }
+            
+            // Play pattern: 1 second tone + 0.5 second silence, repeat
+            while (ringbackShouldPlay && ringbackAudioTrack != null) {
+                ringbackAudioTrack?.write(toneBuffer, 0, toneSamples, AudioTrack.WRITE_BLOCKING)
+                ringbackAudioTrack?.write(silenceBuffer, 0, silenceSamples, AudioTrack.WRITE_BLOCKING)
+            }
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Error in playRingbackToneSynthetic: ${e.message}", e)
+        } finally {
+            ringbackAudioTrack?.stop()
+            ringbackAudioTrack?.release()
+            ringbackAudioTrack = null
         }
     }
 
@@ -527,6 +586,18 @@ class VoipEngine(
         incomingRingtone = null
         outgoingRingbackTone?.stop()
         outgoingRingbackTone = null
+        ringbackShouldPlay = false
+        if (ringbackAudioTrack != null) {
+            try {
+                ringbackAudioTrack?.stop()
+                ringbackAudioTrack?.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping ringback audio track: ${e.message}")
+            }
+            ringbackAudioTrack = null
+        }
+        ringbackPlaybackThread?.join(100)
+        ringbackPlaybackThread = null
         incomingVibrator?.cancel()
         incomingVibrator = null
     }
