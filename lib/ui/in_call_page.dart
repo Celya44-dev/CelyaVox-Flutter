@@ -46,8 +46,25 @@ class _InCallPageState extends State<InCallPage> {
 
   @override
   void dispose() {
+    _stopRinging();
     _eventsSub?.cancel();
     super.dispose();
+  }
+
+  void _startRinging() async {
+    try {
+      await widget.engine.startInAppRinging();
+    } catch (e) {
+      AppLogger.instance.log('Erreur démarrage ringtone: $e');
+    }
+  }
+
+  void _stopRinging() async {
+    try {
+      await widget.engine.stopInAppRinging();
+    } catch (e) {
+      AppLogger.instance.log('Erreur arrêt ringtone: $e');
+    }
   }
 
   Future<void> _ensureMicPermission() async {

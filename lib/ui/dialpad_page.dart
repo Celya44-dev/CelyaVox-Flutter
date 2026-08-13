@@ -214,14 +214,6 @@ class _DialpadPageState extends State<DialpadPage> {
     });
   }
 
-  Future<void> _registerOnStart() async {
-    try {
-      await widget.engine.registerProvisioned();
-    } catch (_) {
-      // Ignore errors here; registration status is reflected via events.
-    }
-  }
-
   Future<void> _loadCallHistory({bool force = false}) async {
     if (_isLoadingHistory) return;
     if (_historyLoaded && !force) return;
