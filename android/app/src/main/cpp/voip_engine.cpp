@@ -178,11 +178,11 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     pjsua_buddy_info buddy_info;
     pjsua_buddy_get_info(buddy_id, &buddy_info);
     
-    // Parser le status de présence: PJSUA_EVSUB_STATE_ACTIVE = subscription active (on reçoit les NOTIFY)
+    // Parser le status de présence: PJSIP_EVSUB_STATE_ACTIVE = subscription active (on reçoit les NOTIFY)
     const char *presence_status = "offline";
     LOGI(">>> on_buddy_state: buddy_id=%d, sub_state=%d, status=%d", buddy_id, buddy_info.sub_state, buddy_info.status);
     
-    if (buddy_info.sub_state == PJSUA_EVSUB_STATE_ACTIVE) {
+    if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
         // Subscription active = on reçoit les NOTIFY du serveur = contact AVAILABLE
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE → presence_status=available");
