@@ -530,8 +530,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     
     // Force transport UDP for all requests (avoid unsupported transports in Contact headers)
     acc_cfg.allow_contact_rewrite = 0;  // Don't rewrite using server's Contact header
-    acc_cfg.allow_via_rewriting = 0;    // Don't rewrite VIA
-    LOGI(">>> nativeRegister: Transport config: allow_contact_rewrite=0, allow_via_rewriting=0 (force UDP routing)");
+    acc_cfg.allow_via_rewrite = 0;      // Don't rewrite VIA
+    LOGI(">>> nativeRegister: Transport config: allow_contact_rewrite=0, allow_via_rewrite=0 (force UDP routing)");
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -569,7 +569,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - has credentials (cred_count from cfg): 2");
     LOGI("    - proxy[0] with transport=udp: %s", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
     LOGI("    - allow_contact_rewrite: 0 (disabled, force UDP routing)");
-    LOGI("    - allow_via_rewriting: 0 (disabled, force UDP routing)");
+    LOGI("    - allow_via_rewrite: 0 (disabled, force UDP routing)");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
     LOGI(">>> nativeRegister: When INVITE 401 is received, retry should use proxy UDP routing (not server Contact)");
 
