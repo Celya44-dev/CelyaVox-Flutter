@@ -254,23 +254,14 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
          buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
     
     // CRITICAL: Si status=0, cela signifie "pas de réponse SIP reçue du tout"
-    // Si status=401, le serveur a refusé l'authentification
-    // Si status=200, le SUBSCRIBE a réussi
-    if (buddy_info.status == 0) {
-        LOGW("=== SIP TRACE: status=0 (NO SIP RESPONSE RECEIVED!) - Check network/firewall");
-        LOGW("=== SIP TRACE: Account credentials check:");
-        LOGW("    - g_acc_id=%d", g_acc_id);
-        LOGW("    - g_account_username=%s", g_account_username.c_str());
-        LOGW("    - g_account_domain=%s", g_account_domain.c_str());
-        LOGW("    - Buddy trying to use account %d for auth", g_acc_id);
-    } else if (buddy_info.status == 401) {
-        LOGW("=== SIP TRACE: RECEIVED 401 UNAUTHORIZED! Server rejected SUBSCRIBE without Digest auth");
-        LOGW("=== SIP TRACE: PJSIP should retry with acc_id=%d credentials", g_acc_id);
-        LOGW("=== SIP TRACE: CRITICAL: If this is the first 401 and we don't see another callback, subscription state machine is stuck");
-    } else if (buddy_info.status == 200) {
-        LOGI("=== SIP TRACE: RECEIVED 200 OK! Digest auth successful or not required");
-    } else if (buddy_info.status > 0) {
-        LOGW("=== SIP TRACE: RECEIVED SIP RESPONSE CODE %d", buddy_info.status);
+    // buddy_info.status contient le type pjsua_buddy_status (enum) et ne peut pas être comparé directement avec des codes HTTP
+    // On se fie à sub_state pour déterminer l'état réel
+    if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
+        LOGI("=== SIP TRACE: sub_state=SENT (waiting for server response with credentials from acc_id=%d)", g_acc_id);
+    } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
+        LOGI("=== SIP TRACE: sub_state=ACTIVE - Server accepted SUBSCRIBE ✓");
+    } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_TERMINATED) {
+        LOGW("=== SIP TRACE: sub_state=TERMINATED - Server ended subscription");
     }
     
     // Parser le status de présence
@@ -279,20 +270,7 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
     } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
-        // Si le buddy reste en SENT avec status=401, c'est un problème d'authentification
-        // PJSIP devrait automatiquement retrier avec les credentials du compte (acc_id=g_acc_id)
-        if (buddy_info.status == 401) {
-            LOGW(">>> on_buddy_state: Buddy in SENT state with 401 Unauthorized.");
-            LOGW(">>> on_buddy_state: Attempting manual pjsua_buddy_subscribe_pres to force Digest auth retry...");
-            pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
-            LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
-        } else if (buddy_info.status == 0) {
-            LOGW(">>> on_buddy_state: Buddy in SENT state with status=0 (no response). Check network connection!");
-            LOGW(">>> on_buddy_state: Device may not be reachable from app network, or firewall blocking port 5060");
-        } else {
-            LOGW(">>> on_buddy_state: Buddy in SENT state (status=%d), attempting pjsua_buddy_subscribe_pres...", buddy_info.status);
-            pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
-            LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
+        LOGI(">>> on_buddy_state: Subscription SENT - PJSIP will retry with acc_id=%d credentials if needed", g_acc_id);
         }
         LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → waiting for response from server");
     } else {
@@ -540,14 +518,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     
     // CRITICAL VERIFICATION: Check that account credentials are using STATIC buffers, not JNI strings
     // If they point to JNI memory, 401 retries will fail when JNI strings are released
-    pjsua_acc_info acc_info;
-    pjsua_acc_get_info(g_acc_id, &acc_info);
-    LOGI(">>> nativeRegister: VERIFICATION - Account info after pjsua_acc_add:");
-    LOGI("    - id=%d (g_acc_id)", g_acc_id);
-    LOGI("    - uri=%.*s", (int)acc_info.uri.slen, acc_info.uri.ptr);
-    LOGI("    - cred_count=%d", acc_cfg.cred_count);
-    LOGI("    - Static buffer username=%s (should be used for auth retry)", g_global_cred_username);
-    LOGI("    - Static buffer password length=%zu", strlen(g_global_cred_password));
+    LOGI(">>> nativeRegister: VERIFICATION - Account created successfully:");
+    LOGI("    - Account ID (g_acc_id)=%d", g_acc_id);
+    LOGI("    - Credential count=%d (username=%s, password set)", acc_cfg.cred_count, g_global_cred_username);
+    LOGI("    - use_shared_auth=PJ_TRUE (enables credential sharing across REGISTER/INVITE/SUBSCRIBE)");
 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
