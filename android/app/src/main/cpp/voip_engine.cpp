@@ -243,7 +243,9 @@ static bool ensure_endpoint() {
 
     pjsua_logging_config log_cfg;
     pjsua_logging_config_default(&log_cfg);
-    log_cfg.console_level = 4;
+    log_cfg.console_level = 4;  // INFO level
+    log_cfg.level = 4;          // File level aussi à INFO
+    log_cfg.msg_logging = PJ_TRUE;  // Activer logging des messages SIP
 
     pjsua_media_config media_cfg;
     pjsua_media_config_default(&media_cfg);
@@ -589,6 +591,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
     const char *prefix_str = env->GetStringUTFChars(jprefix, nullptr);
     LOGI(">>> nativeSubscribePresence CALLED: contact=%s, prefix=%s", contact_str, prefix_str);
+    
+    // DEBUG: Vérifier que le compte par défaut a les credentials
+    pjsua_acc_id default_acc = pjsua_acc_get_default();
+    LOGI(">>> nativeSubscribePresence: default account ID = %d, g_acc_id = %d", default_acc, g_acc_id);
+    if (default_acc != g_acc_id) {
+        LOGW(">>> nativeSubscribePresence: WARNING - default account (%d) != our account (%d)!", default_acc, g_acc_id);
+    }
+    
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Vérifier si déjà subscribé
