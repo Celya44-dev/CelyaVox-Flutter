@@ -63,7 +63,9 @@ static void pjsip_log_callback(int level, const char *data, int len) {
         
         // Préfixer avec "SIP TRAME:" pour faciliter les grep
         // Colorer selon le contenu pour mieux identifier les trames importantes
-        if (strstr(log_buf, "SUBSCRIBE")) {
+        if (strstr(log_buf, "INVITE")) {
+            LOGI("=== SIP MSG [INVITE] %s", log_buf);
+        } else if (strstr(log_buf, "SUBSCRIBE")) {
             LOGI("=== SIP MSG [SUBSCRIBE] %s", log_buf);
         } else if (strstr(log_buf, "401") || strstr(log_buf, "Unauthorized")) {
             LOGW("=== SIP MSG [401 AUTH REQUIRED] %s", log_buf);
@@ -541,7 +543,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     pjsua_acc_info acc_info;
     pjsua_acc_get_info(g_acc_id, &acc_info);
     LOGI(">>> nativeRegister: VERIFICATION - Account info after pjsua_acc_add:");
-    LOGI("    - id=%s", acc_info.id.ptr);
+    LOGI("    - id=%d (g_acc_id)", g_acc_id);
+    LOGI("    - uri=%.*s", (int)acc_info.uri.slen, acc_info.uri.ptr);
     LOGI("    - cred_count=%d", acc_cfg.cred_count);
     LOGI("    - Static buffer username=%s (should be used for auth retry)", g_global_cred_username);
     LOGI("    - Static buffer password length=%zu", strlen(g_global_cred_password));
