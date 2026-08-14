@@ -689,8 +689,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     pjsua_call_id call_id = PJSUA_INVALID_ID;
     pj_status_t status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
     
-    env->ReleaseStringUTFChars(jnumber, number);
-    
     LOGI(">>> nativeMakeCall: pjsua_call_make_call returned status=%d, call_id=%d", status, call_id);
     if (status != PJ_SUCCESS) {
         char errbuf[128];
@@ -709,6 +707,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
             LOGI("nativeMakeCall: Retry after set_null_snd_dev status=%d, call_id=%d", status, call_id);
         }
     }
+    
     env->ReleaseStringUTFChars(jnumber, number);
     
     if (status != PJ_SUCCESS) {
