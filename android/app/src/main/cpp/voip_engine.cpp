@@ -620,9 +620,18 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
     buddy_cfg.subscribe = PJ_TRUE;  // Activer la subscription de présence
-    // NOTE: Les credentials pour l'authentification Digest des SUBSCRIBE sont gérées 
-    // automatiquement par PJSIP via le compte enregistré (g_acc_id)
-    // On n'a pas besoin de les ajouter au buddy config
+    
+    // Ajouter les credentials du compte pour l'authentification Digest des SUBSCRIBE
+    // (même approche que le registrar dans nativeRegister)
+    // PJSIP va matcher le realm du 401 automatiquement sans qu'on le fixe
+    buddy_cfg.cred_count = 1;
+    buddy_cfg.cred_info[0].scheme = pj_str_t{const_cast<char *>("digest"), 6};
+    buddy_cfg.cred_info[0].username = pj_str_t{const_cast<char *>(g_account_username.c_str()), 
+                                               static_cast<pj_ssize_t>(g_account_username.size())};
+    buddy_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+    buddy_cfg.cred_info[0].data = pj_str_t{const_cast<char *>(g_account_password.c_str()), 
+                                            static_cast<pj_ssize_t>(g_account_password.size())};
+    // realm: NOT SET - PJSIP va matcher le realm du 401 dynamiquement
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     pjsua_buddy_id buddy_id;
