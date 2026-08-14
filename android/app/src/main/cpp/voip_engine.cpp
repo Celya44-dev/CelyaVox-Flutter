@@ -464,7 +464,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     strncpy(g_global_cred_username, user, sizeof(g_global_cred_username) - 1);
     strncpy(g_global_cred_password, pass, sizeof(g_global_cred_password) - 1);
     
-    LOGI(">>> nativeRegister: Credentials copied to static buffers: username=%s", g_global_cred_username);
+    LOGI(">>> nativeRegister: CRITICAL FIX - Copying JNI credentials to static buffers");
+    LOGI(">>> nativeRegister: JNI user=%s, pass=%s (will be released after function)", user, pass);
+    LOGI(">>> nativeRegister: Static buffer username=%s, password=%s (PERSISTENT)", g_global_cred_username, g_global_cred_password);
+    LOGI(">>> nativeRegister: Buffer addresses: username_buf=%p, password_buf=%p", g_global_cred_username, g_global_cred_password);
 
     if (g_acc_id != PJSUA_INVALID_ID) {
         pjsua_acc_del(g_acc_id);
@@ -491,6 +494,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.cred_info[0].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
     acc_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
     acc_cfg.cred_info[0].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
+    acc_cfg.cred_info[0].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
+    
+    LOGI(">>> nativeRegister: Credential[0] (realm=asterisk, algo=MD5):");
+    LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[0].username.ptr, acc_cfg.cred_info[0].username.ptr);
+    LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[0].data.ptr, acc_cfg.cred_info[0].data.slen);
     
     // Credential 2: realm="*" (wildcard pour les autres realms)
     acc_cfg.cred_info[1].realm = pj_str_t{g_global_cred_realm_wildcard, 1};
@@ -498,11 +506,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.cred_info[1].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
     acc_cfg.cred_info[1].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
     acc_cfg.cred_info[1].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
+    acc_cfg.cred_info[1].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
+    
+    LOGI(">>> nativeRegister: Credential[1] (realm=wildcard, algo=MD5):");
+    LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
+    LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
         acc_cfg.proxy[0] = pj_str_t{const_cast<char *>(proxy), static_cast<pj_ssize_t>(strlen(proxy))};
         acc_cfg.proxy_cnt = 1;
     }
+
+    // PJSIP 2.17: Enable shared authentication session
+    // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
+    // Ensures Digest auth retry works for all modules using account credentials
+    acc_cfg.use_shared_auth = PJ_TRUE;
+    LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -516,6 +535,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
         env->ReleaseStringUTFChars(jproxy, proxy);
         return JNI_FALSE;
     }
+    
+    // CRITICAL VERIFICATION: Check that account credentials are using STATIC buffers, not JNI strings
+    // If they point to JNI memory, 401 retries will fail when JNI strings are released
+    pjsua_acc_info acc_info;
+    pjsua_acc_get_info(g_acc_id, &acc_info);
+    LOGI(">>> nativeRegister: VERIFICATION - Account info after pjsua_acc_add:");
+    LOGI("    - id=%s", acc_info.id.ptr);
+    LOGI("    - cred_count=%d", acc_cfg.cred_count);
+    LOGI("    - Static buffer username=%s (should be used for auth retry)", g_global_cred_username);
+    LOGI("    - Static buffer password length=%zu", strlen(g_global_cred_password));
 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
