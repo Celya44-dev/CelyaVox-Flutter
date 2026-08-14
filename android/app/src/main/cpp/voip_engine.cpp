@@ -662,10 +662,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
     buddy_cfg.subscribe = PJ_TRUE;              // Activer la subscription de présence
-    // NOTE: buddy_cfg n'a pas de champ acc_id en PJSIP 2.17
-    // Le buddy utilisera les credentials du compte par défaut (g_acc_id) automatiquement
+    buddy_cfg.acc_id = g_acc_id;                // IMPORTANT: Lier le buddy au compte pour réutiliser ses credentials
+    // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
-    LOGI(">>> nativeSubscribePresence: buddy configured for SUBSCRIBE (will use default account credentials)");
+    LOGI(">>> nativeSubscribePresence: buddy configured with acc_id=%d for Digest auth on SUBSCRIBE", g_acc_id);
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     pjsua_buddy_id buddy_id;
