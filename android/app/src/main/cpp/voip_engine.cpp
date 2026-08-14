@@ -192,10 +192,9 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
          buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
     
     // DEBUG: Afficher les infos détaillées du buddy
-    LOGI(">>> on_buddy_state DEBUG: uri=%s, monitor_presence=%d, sub_dlg_state=%d",
+    LOGI(">>> on_buddy_state DEBUG: uri=%s, monitor_pres=%d",
          buddy_info.uri.ptr ? buddy_info.uri.ptr : "N/A",
-         buddy_info.monitor_presence,
-         buddy_info.sub_dlg_state);
+         buddy_info.monitor_pres);
     
     // Parser le status de présence
     const char *presence_status = "offline";
@@ -203,14 +202,7 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
     } else {
-        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → checking status=%d for auth failures...", sub_state_str, buddy_info.status);
-        // Status codes: 0=OK, 401=Unauthorized, 407=Proxy auth needed, etc.
-        if (buddy_info.status == 401 || buddy_info.status == 407) {
-            LOGE(">>> on_buddy_state: Got auth challenge (status=%d) - credentials should retry SUBSCRIBE", buddy_info.status);
-        } else if (buddy_info.status != 0 && buddy_info.status != 200) {
-            LOGW(">>> on_buddy_state: Unexpected status=%d (%s) - may indicate server error or network issue", 
-                 buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
-        }
+        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → need to wait for 200 OK or ACTIVE state", sub_state_str);
     }
     
     // Lookup du contact depuis la reverse map
