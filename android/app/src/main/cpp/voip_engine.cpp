@@ -410,31 +410,33 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     }
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
+    
+    // DEBUG: Vérifier que g_acc_id est correctement set par pjsua_acc_add
+    LOGI(">>> nativeRegister: pjsua_acc_add returned status=%d, g_acc_id=%d", status, g_acc_id);
+    if (status != PJ_SUCCESS) {
+        LOGE(">>> nativeRegister: Account add FAILED with status=%d", status);
+        env->ReleaseStringUTFChars(juser, user);
+        env->ReleaseStringUTFChars(jpass, pass);
+        env->ReleaseStringUTFChars(jdomain, domain);
+        env->ReleaseStringUTFChars(jproxy, proxy);
+        return JNI_FALSE;
+    }
 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
     g_account_password = pass;
     g_account_domain = domain;
     
-    // NOTE: Credentials globaux doivent être configurés lors de pjsua_init() pour que SUBSCRIBE puisse les utiliser
-    // Pour maintenant, les credentials du compte devraient suffire puisque le buddy doit hériter du compte par défaut
-    
-    LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s (credentials saved for BLF SUBSCRIBE)", user, domain);
+    LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials saved for BLF SUBSCRIBE)", user, domain, g_acc_id);
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
     env->ReleaseStringUTFChars(jdomain, domain);
     env->ReleaseStringUTFChars(jproxy, proxy);
-
-    if (status != PJ_SUCCESS) {
-        LOGE("Account add failed: %d", status);
-        return JNI_FALSE;
-    }
     
-    // Sauvegarder le domaine pour construire les URI de buddy
-    g_account_domain = domain;
+    // Mettre le compte en défaut pour que les buddies l'utilisent
     pjsua_acc_set_default(g_acc_id);
-    LOGI("Registered account id=%d", g_acc_id);
+    LOGI(">>> nativeRegister: Account set as default for buddy SUBSCRIBE authentication");
     return JNI_TRUE;
 }
 
@@ -607,7 +609,15 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
     const char *prefix_str = env->GetStringUTFChars(jprefix, nullptr);
-    LOGI(">>> nativeSubscribePresence CALLED: contact=%s, prefix=%s", contact_str, prefix_str);
+    LOGI(">>> nativeSubscribePresence CALLED: contact=%s, prefix=%s, g_acc_id=%d (should be >= 0)", contact_str, prefix_str, g_acc_id);
+    
+    // DEBUG: Vérifier que g_acc_id est valide (non-INVALID et accessible)
+    if (g_acc_id < 0) {
+        LOGE(">>> nativeSubscribePresence: ERROR - g_acc_id=%d is negative/invalid!", g_acc_id);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_FALSE;
+    }
     
     // DEBUG: Vérifier que le compte par défaut a les credentials
     pjsua_acc_id default_acc = pjsua_acc_get_default();
