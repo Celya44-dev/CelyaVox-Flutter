@@ -161,9 +161,21 @@ class VoipMethodChannel(
                 "subscribePresence" -> {
                     val contact = requireArgument<String>(call, "contact")
                     val prefix = call.argument<String>("prefix") ?: ""
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact, prefix=$prefix")
-                    engine.subscribePresence(contact, prefix)
+                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact, prefix=$prefix (async on background thread)")
+                    
+                    // Retourner IMMÉDIATEMENT au Dart (non-bloquant)
                     result.success(null)
+                    
+                    // Lancer subscribePresence sur un background thread (pas sur UI thread!)
+                    Thread {
+                        try {
+                            android.util.Log.i("VoipMethodChannel", ">>> subscribePresence BG thread: starting for $contact")
+                            engine.subscribePresence(contact, prefix)
+                            android.util.Log.i("VoipMethodChannel", ">>> subscribePresence BG thread: DONE for $contact")
+                        } catch (e: Exception) {
+                            android.util.Log.e("VoipMethodChannel", ">>> subscribePresence BG thread FAILED: ${e.message}", e)
+                        }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }
