@@ -46,6 +46,37 @@ static void ensure_pj_thread_registered(const char *name) {
 // Forward declarations
 static void emit_event(const char *type, const char *message);
 
+// Custom PJSIP logger callback pour tracer TOUTES les trames SIP
+static void pjsip_log_callback(int level, const char *data, int len) {
+    // Log uniquement les messages SIP (contiennent "SUBSCRIBE", "401", "200", etc.)
+    if (data && len > 0) {
+        // Détecteur de trames SIP importantes
+        if (strstr(data, "SUBSCRIBE") || 
+            strstr(data, "200 ") || 
+            strstr(data, "401 ") ||
+            strstr(data, "WWW-Authenticate") ||
+            strstr(data, "Proxy-Authenticate") ||
+            strstr(data, "Authorization") ||
+            strstr(data, "NOTIFY") ||
+            strstr(data, "SIP/2.0")) {
+            
+            // Formater le log
+            char log_buf[512];
+            int copy_len = (len < 500) ? len : 500;
+            strncpy(log_buf, data, copy_len);
+            log_buf[copy_len] = '\0';
+            
+            // Retirer le newline final si présent
+            if (log_buf[copy_len-1] == '\n') {
+                log_buf[copy_len-1] = '\0';
+            }
+            
+            // Préfixer avec "SIP TRAME:" pour faciliter les grep
+            LOGI("=== SIP TRAME [level=%d]: %s", level, log_buf);
+        }
+    }
+}
+
 static JNIEnv *attach_thread(bool *did_attach) {
     *did_attach = false;
     if (!g_vm) return nullptr;
@@ -193,13 +224,25 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         case PJSIP_EVSUB_STATE_TERMINATED:sub_state_str = "TERMINATED"; break;
     }
     
-    LOGI(">>> on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d, status_text=%s", 
+    // SIP TRACE: Afficher le code de statut SIP (401, 200, etc.)
+    LOGI("=== SIP TRACE: on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d (SIP CODE), status_text=%s", 
          buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
     
-    // DEBUG: Afficher les infos détaillées du buddy
-    LOGI(">>> on_buddy_state DEBUG: uri=%s, monitor_pres=%d",
+    // DEBUG: Afficher les infos détaillées du buddy incluant le code SIP
+    LOGI("=== SIP TRACE: on_buddy_state DEBUG: uri=%s, monitor_pres=%d, sip_code=%d",
          buddy_info.uri.ptr ? buddy_info.uri.ptr : "N/A",
-         buddy_info.monitor_pres);
+         buddy_info.monitor_pres,
+         buddy_info.status);  // buddy_info.status contient le code SIP (401, 200, etc.)
+    
+    // CRITICAL: Si status=401, cela signifie que le serveur a refusé l'authentification
+    if (buddy_info.status == 401) {
+        LOGW("=== SIP TRACE: RECEIVED 401 UNAUTHORIZED! Server rejected SUBSCRIBE without Digest auth");
+        LOGW("=== SIP TRACE: PJSIP should retry with acc_id=%d credentials", g_acc_id);
+    } else if (buddy_info.status == 200) {
+        LOGI("=== SIP TRACE: RECEIVED 200 OK! Digest auth successful or not required");
+    } else if (buddy_info.status > 0) {
+        LOGW("=== SIP TRACE: RECEIVED SIP RESPONSE CODE %d", buddy_info.status);
+    }
     
     // Parser le status de présence
     const char *presence_status = "offline";
@@ -207,12 +250,17 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
     } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
-        // Si le buddy reste en SENT avec status=0, c'est probablement un problème d'authentification
-        // Essayer de forcer un resubscribe avec credentials du compte
-        LOGW(">>> on_buddy_state: Buddy in SENT state, attempting pjsua_buddy_subscribe_pres to force re-subscribe with credentials...");
-        pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
-        LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
-        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → attempting credentials retry");
+        // Si le buddy reste en SENT avec status=401, c'est un problème d'authentification
+        // PJSIP devrait automatiquement retrier avec les credentials du compte (acc_id=g_acc_id)
+        if (buddy_info.status == 401) {
+            LOGW(">>> on_buddy_state: Buddy in SENT state with 401 Unauthorized. Waiting for PJSIP retry with Digest auth...");
+            LOGW(">>> on_buddy_state: IMPORTANT: Check that acc_id=%d is linked to account with credentials!", g_acc_id);
+        } else {
+            LOGW(">>> on_buddy_state: Buddy in SENT state, attempting pjsua_buddy_subscribe_pres to force re-subscribe with credentials...");
+            pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
+            LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
+        }
+        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → waiting for auth retry");
     } else {
         LOGI(">>> on_buddy_state: Subscription NOT active (%s) → need to wait for 200 OK or ACTIVE state", sub_state_str);
     }
@@ -255,10 +303,10 @@ static bool ensure_endpoint() {
 
     pjsua_logging_config log_cfg;
     pjsua_logging_config_default(&log_cfg);
-    log_cfg.console_level = 5;  // DEBUG level (plus verbose)
-    log_cfg.level = 5;          // File level aussi
+    log_cfg.console_level = 6;  // TRACE level (maximum verbosity - shows ALL SIP messages)
+    log_cfg.level = 6;          // File level aussi - captures everything
     log_cfg.msg_logging = PJ_TRUE;  // Activer logging des messages SIP
-    log_cfg.decor = PJ_LOG_HAS_SENDER | PJ_LOG_HAS_LEVEL_TEXT;
+    log_cfg.decor = PJ_LOG_HAS_SENDER | PJ_LOG_HAS_LEVEL_TEXT | PJ_LOG_HAS_MICRO_SEC;  // Include microseconds for timing
 
     pjsua_media_config media_cfg;
     pjsua_media_config_default(&media_cfg);
@@ -275,6 +323,10 @@ static bool ensure_endpoint() {
         pjsua_destroy();
         return false;
     }
+
+    // Enregistrer le callback personnalisé pour tracer les trames SIP
+    LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
+    pj_log_set_log_func(&pjsip_log_callback);
 
     pjsua_transport_config trans_cfg;
     pjsua_transport_config_default(&trans_cfg);
