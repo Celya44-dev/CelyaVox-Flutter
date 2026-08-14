@@ -10,11 +10,6 @@
 #include <pjsua-lib/pjsua.h>
 #include <pjmedia/audiodev.h>
 
-// Accès à la structure globale PJSUA pour configurer les credentials globaux
-extern "C" {
-    extern pjsua_var_t pjsua_var;
-}
-
 #define LOG_TAG "PjsipNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
@@ -29,7 +24,6 @@ static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::string g_account_username = "";  // Username du compte SIP (pour auth Digest des SUBSCRIBE)
 static std::string g_account_password = "";  // Password du compte SIP (pour auth Digest des SUBSCRIBE)
-static std::string g_account_domain = "";    // Domain du compte SIP
 // Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
 static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
@@ -422,35 +416,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     g_account_password = pass;
     g_account_domain = domain;
     
-    // IMPORTANT: Copier les credentials au niveau GLOBAL aussi
-    // PJSIP cherche les credentials pour authentifier le SUBSCRIBE dans les credentials globaux
-    // Donc on doit les ajouter là aussi, pas juste au niveau du compte
-    pj_ansi_strcpy(g_global_cred_username, user);
-    pj_ansi_strcpy(g_global_cred_password, pass);
-    
-    // Essayer d'accéder à pjsua_var pour configurer les credentials globaux
-    if (pjsua_var.cred_count < PJSUA_ACC_MAX_PROXIES) {
-        LOGI(">>> nativeRegister: Adding credentials to GLOBAL level (pjsua_var) for buddy SUBSCRIBE auth");
-        
-        // Credential global 1: realm="asterisk"
-        pjsua_var.cred_info[pjsua_var.cred_count].realm = pj_str(g_global_cred_realm_asterisk);
-        pjsua_var.cred_info[pjsua_var.cred_count].scheme = pj_str("digest");
-        pjsua_var.cred_info[pjsua_var.cred_count].username = pj_str(g_global_cred_username);
-        pjsua_var.cred_info[pjsua_var.cred_count].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-        pjsua_var.cred_info[pjsua_var.cred_count].data = pj_str(g_global_cred_password);
-        pjsua_var.cred_count++;
-        
-        if (pjsua_var.cred_count < PJSUA_ACC_MAX_PROXIES) {
-            // Credential global 2: realm="*" (wildcard)
-            pjsua_var.cred_info[pjsua_var.cred_count].realm = pj_str(g_global_cred_realm_wildcard);
-            pjsua_var.cred_info[pjsua_var.cred_count].scheme = pj_str("digest");
-            pjsua_var.cred_info[pjsua_var.cred_count].username = pj_str(g_global_cred_username);
-            pjsua_var.cred_info[pjsua_var.cred_count].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-            pjsua_var.cred_info[pjsua_var.cred_count].data = pj_str(g_global_cred_password);
-            pjsua_var.cred_count++;
-        }
-        LOGI(">>> nativeRegister: Global credentials configured! Total global cred_count=%d", pjsua_var.cred_count);
-    }
+    // NOTE: Credentials globaux doivent être configurés lors de pjsua_init() pour que SUBSCRIBE puisse les utiliser
+    // Pour maintenant, les credentials du compte devraient suffire puisque le buddy doit hériter du compte par défaut
     
     LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s (credentials saved for BLF SUBSCRIBE)", user, domain);
 
@@ -684,9 +651,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config buddy_cfg;
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
-    buddy_cfg.subscribe = PJ_TRUE;  // Activer la subscription de présence
-    // NOTE: Le buddy utilisera les credentials du compte g_acc_id par défaut (pas de champ acc_id dans pjsua_buddy_config)
-    LOGI(">>> nativeSubscribePresence: buddy will use default account (g_acc_id=%d) credentials for 401 Digest auth", g_acc_id);
+    buddy_cfg.subscribe = PJ_TRUE;              // Activer la subscription de présence
+    buddy_cfg.acc_id = g_acc_id;                 // Lier au compte qui a les credentials pour Digest auth
+    
+    LOGI(">>> nativeSubscribePresence: buddy configured with acc_id=%d for SUBSCRIBE Digest authentication", g_acc_id);
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     pjsua_buddy_id buddy_id;
