@@ -172,41 +172,46 @@ static void on_reg_state(pjsua_acc_id acc_id) {
 }
 
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
-    // Callback appelé quand l'état de présence d'un buddy change
-    // PJSIP gère automatiquement les SUBSCRIBE/NOTIFY
-    LOGI(">>> on_buddy_state CALLED: buddy_id=%d (PJSIP received NOTIFY from server)", buddy_id);
-    
-    // Récupérer les infos du buddy pour extraire le status de présence
+    // Callback appelé quand l'état du buddy change
+    // Ceci peut être appelé plusieurs fois: initial SENT, après 401 retry, après 200 OK, après NOTIFY
     pjsua_buddy_info buddy_info;
     pjsua_buddy_get_info(buddy_id, &buddy_info);
     
-    // Parser le status de présence: PJSIP_EVSUB_STATE_ACTIVE = subscription active (on reçoit les NOTIFY)
-    const char *presence_status = "offline";
-    LOGI(">>> on_buddy_state: buddy_id=%d, sub_state=%d, status=%d", buddy_id, buddy_info.sub_state, buddy_info.status);
-    
-    if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
-        // Subscription active = on reçoit les NOTIFY du serveur = contact AVAILABLE
-        presence_status = "available";
-        LOGI(">>> on_buddy_state: Subscription ACTIVE → presence_status=available");
-    } else {
-        // Pas de subscription active = contact OFFLINE
-        presence_status = "offline";
-        LOGI(">>> on_buddy_state: Subscription NOT active (sub_state=%d) → presence_status=offline", buddy_info.sub_state);
+    // Convertir sub_state en string lisible
+    const char *sub_state_str = "UNKNOWN";
+    switch (buddy_info.sub_state) {
+        case PJSIP_EVSUB_STATE_NULL:      sub_state_str = "NULL"; break;
+        case PJSIP_EVSUB_STATE_SENT:      sub_state_str = "SENT"; break;
+        case PJSIP_EVSUB_STATE_ACCEPTED:  sub_state_str = "ACCEPTED"; break;
+        case PJSIP_EVSUB_STATE_PENDING:   sub_state_str = "PENDING"; break;
+        case PJSIP_EVSUB_STATE_ACTIVE:    sub_state_str = "ACTIVE"; break;
+        case PJSIP_EVSUB_STATE_TERMINATED:sub_state_str = "TERMINATED"; break;
     }
     
-    // Lookup du contact depuis la reverse map (plutôt que d'appeler JNI depuis Kotlin)
+    LOGI(">>> on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d", 
+         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status);
+    
+    // Parser le status de présence
+    const char *presence_status = "offline";
+    if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
+        presence_status = "available";
+        LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
+    } else {
+        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → presence_status=offline", sub_state_str);
+    }
+    
+    // Lookup du contact depuis la reverse map
     std::lock_guard<std::mutex> lock(g_mutex);
     std::string contact = "";
     auto it = g_buddy_reverse_map.find(buddy_id);
     if (it != g_buddy_reverse_map.end()) {
         contact = it->second;
     }
-    LOGI(">>> on_buddy_state: buddy_id=%d, contact=%s", buddy_id, contact.c_str());
     
-    // Format: "contact:status" (contact ET status, pas besoin de JNI lookup)
+    // Émettre l'event
     char event_data[256];
     pj_ansi_snprintf(event_data, sizeof(event_data), "%s:%s", contact.c_str(), presence_status);
-    LOGI(">>> Emitting presence_updated event: %s", event_data);
+    LOGI(">>> Emitting presence_updated: %s (contact=%s, state=%s)", event_data, contact.c_str(), presence_status);
     emit_event("presence_updated", event_data);
 }
 
