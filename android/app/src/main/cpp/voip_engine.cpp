@@ -201,6 +201,13 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
+    } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
+        // Si le buddy reste en SENT avec status=0, c'est probablement un problème d'authentification
+        // Essayer de forcer un resubscribe avec credentials du compte
+        LOGW(">>> on_buddy_state: Buddy in SENT state, attempting pjsua_buddy_subscribe_pres to force re-subscribe with credentials...");
+        pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
+        LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
+        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → attempting credentials retry");
     } else {
         LOGI(">>> on_buddy_state: Subscription NOT active (%s) → need to wait for 200 OK or ACTIVE state", sub_state_str);
     }
