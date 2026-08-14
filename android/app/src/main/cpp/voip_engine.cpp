@@ -55,8 +55,8 @@ static void pjsip_log_callback(int level, const char *data, int len) {
     // Log TOUTES les lignes PJSIP (level 3=INFO and above)
     if (data && len > 0 && level >= 3) {  // 3=INFO, 4=WARNING, 5=ERROR, 6=CRITICAL
         // Formater le log
-        char log_buf[256];
-        int copy_len = (len < 250) ? len : 250;
+        char log_buf[512];  // Increased from 256 to capture longer messages
+        int copy_len = (len < 500) ? len : 500;
         strncpy(log_buf, data, copy_len);
         log_buf[copy_len] = '\0';
         
@@ -82,26 +82,27 @@ static void pjsip_log_callback(int level, const char *data, int len) {
         } else if (strstr(log_buf, "WWW-Authenticate") || strstr(log_buf, "Authorization")) {
             LOGW("=== SIP MSG [AUTH] %s", log_buf);
         } else if (strstr(log_buf, "Contact")) {
-            LOGI("=== SIP MSG [CONTACT] %s", log_buf);
+            LOGW("=== SIP MSG [CONTACT] *** %s", log_buf);
         } else if (strstr(log_buf, "Via")) {
             LOGI("=== SIP MSG [VIA] %s", log_buf);
         } else if (strstr(log_buf, "Route")) {
-            LOGI("=== SIP MSG [ROUTE] %s", log_buf);
+            LOGW("=== SIP MSG [ROUTE] *** %s", log_buf);
         } else if (strstr(log_buf, "target") || strstr(log_buf, "Target") || strstr(log_buf, "server") || strstr(log_buf, "Server")) {
-            LOGW("=== SIP MSG [TARGET] %s", log_buf);
-        } else if (strstr(log_buf, "transport") || strstr(log_buf, "Transport") || 
-                   strstr(log_buf, "udp") || strstr(log_buf, "tcp") || strstr(log_buf, "tls")) {
-            LOGW("=== SIP MSG [TRANSPORT] %s", log_buf);
+            LOGW("=== SIP MSG [TARGET] *** %s", log_buf);
+        } else if (strstr(log_buf, "transport=") || strstr(log_buf, "Transport:") ||
+                   strstr(log_buf, ";udp") || strstr(log_buf, ";tcp") || strstr(log_buf, ";tls") ||
+                   strstr(log_buf, ";sctp") || strstr(log_buf, ";ws") || strstr(log_buf, ";wss")) {
+            LOGW("=== SIP MSG [TRANSPORT] *** %s", log_buf);
         } else if (strstr(log_buf, "tsx") || strstr(log_buf, "tsxacb") || strstr(log_buf, "transaction")) {
             LOGI("=== SIP MSG [TRANSACTION] %s", log_buf);
-        } else if (strstr(log_buf, "Unsupported") || strstr(log_buf, "FAILED") || 
-                   strstr(log_buf, "Error") || strstr(log_buf, "error") || 
+        } else if (strstr(log_buf, "Unsupported") || strstr(log_buf, "PJSIP_EUNSUPTRANSPORT") ||
+                   strstr(log_buf, "FAILED") || strstr(log_buf, "Error") || strstr(log_buf, "error") || 
                    strstr(log_buf, "failure") || strstr(log_buf, "Failure") ||
                    strstr(log_buf, "Temporary failure")) {
-            LOGW("=== SIP MSG [ERROR] %s", log_buf);
+            LOGW("=== SIP MSG [ERROR] *** %s", log_buf);
         } else if (strstr(log_buf, "next server") || strstr(log_buf, "Next server") || 
-                   strstr(log_buf, "will try")) {
-            LOGW("=== SIP MSG [FAILOVER] %s", log_buf);
+                   strstr(log_buf, "will try") || strstr(log_buf, "failover")) {
+            LOGW("=== SIP MSG [FAILOVER] *** %s", log_buf);
         } else if (strstr(log_buf, "SIP/2.0")) {
             // Toute ligne contenant SIP/2.0 (request ou response)
             LOGI("=== SIP MSG [SIP FRAME] %s", log_buf);

@@ -52,13 +52,13 @@ class VoipMethodChannel(
                     val username = provisioningManager.getSipUsername()
                     val password = provisioningManager.getSipPassword()
                     val domain = provisioningManager.getSipDomain()
-                    var proxy = provisioningManager.getSipProxy() ?: ""
+                    val proxy = provisioningManager.getSipProxy() ?: ""  // Keep empty if not configured
                     
                     // DEBUG: Log provisioning data
                     android.util.Log.i("VoipMethodChannel", ">>> registerProvisioned DEBUG:")
                     android.util.Log.i("VoipMethodChannel", "    username=$username")
                     android.util.Log.i("VoipMethodChannel", "    domain=$domain")
-                    android.util.Log.i("VoipMethodChannel", "    proxy_from_storage=$proxy (empty=${proxy.isEmpty()})")
+                    android.util.Log.i("VoipMethodChannel", "    proxy=$proxy (from provisioning storage)")
                     
                     // Check all required fields
                     if (username.isNullOrBlank() || password.isNullOrBlank() || domain.isNullOrBlank()) {
@@ -66,14 +66,7 @@ class VoipMethodChannel(
                         return
                     }
                     
-                    // FIX: If no explicit proxy configured, use domain as proxy
-                    // PJSIP expects proxy in format "sip:host" or "sip:host:port"
-                    if (proxy.isEmpty()) {
-                        proxy = "sip:$domain"  // domain is guaranteed non-null at this point
-                        android.util.Log.i("VoipMethodChannel", "    >>> PROXY WAS EMPTY - formatted as: $proxy")
-                    }
-                    
-                    android.util.Log.i("VoipMethodChannel", "    >>> Calling engine.register() with proxy=$proxy")
+                    android.util.Log.i("VoipMethodChannel", "    >>> Calling engine.register() with proxy='$proxy'")
                     engine.register(username, password, domain, proxy)
                     result.success(null)
                 }
