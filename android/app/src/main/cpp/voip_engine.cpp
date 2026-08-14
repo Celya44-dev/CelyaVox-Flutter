@@ -62,25 +62,28 @@ static void pjsip_log_callback(int level, const char *data, int len) {
         }
         
         // Préfixer avec "SIP TRAME:" pour faciliter les grep
-        // Colorer selon le contenu
+        // Colorer selon le contenu pour mieux identifier les trames importantes
         if (strstr(log_buf, "SUBSCRIBE")) {
-            LOGI("=== SIP TRAME [SUBSCRIBE] %s", log_buf);
+            LOGI("=== SIP MSG [SUBSCRIBE] %s", log_buf);
         } else if (strstr(log_buf, "401") || strstr(log_buf, "Unauthorized")) {
-            LOGW("=== SIP TRAME [401 AUTH] %s", log_buf);
-        } else if (strstr(log_buf, "200")) {
-            LOGI("=== SIP TRAME [200 OK] %s", log_buf);
+            LOGW("=== SIP MSG [401 AUTH REQUIRED] %s", log_buf);
+        } else if (strstr(log_buf, "200") || strstr(log_buf, "200 OK")) {
+            LOGI("=== SIP MSG [200 OK] %s", log_buf);
         } else if (strstr(log_buf, "NOTIFY")) {
-            LOGI("=== SIP TRAME [NOTIFY] %s", log_buf);
-        } else if (strstr(log_buf, "pjsua_buddy")) {
-            LOGI("=== SIP TRAME [BUDDY] %s", log_buf);
-        } else if (strstr(log_buf, "evsub")) {
-            LOGI("=== SIP TRAME [EVSUB] %s", log_buf);
+            LOGI("=== SIP MSG [NOTIFY] %s", log_buf);
+        } else if (strstr(log_buf, "REGISTER") || strstr(log_buf, "registration")) {
+            LOGI("=== SIP MSG [REGISTER] %s", log_buf);
+        } else if (strstr(log_buf, "WWW-Authenticate") || strstr(log_buf, "Authorization")) {
+            LOGW("=== SIP MSG [AUTH] %s", log_buf);
+        } else if (strstr(log_buf, "SIP/2.0")) {
+            // Toute ligne contenant SIP/2.0 (request ou response)
+            LOGI("=== SIP MSG [SIP FRAME] %s", log_buf);
+        } else if (strstr(log_buf, "pjsua") || strstr(log_buf, "evsub")) {
+            // Messages PJSIP relatifs à la subscription
+            LOGI("=== SIP LOG [PJSUA] %s", log_buf);
         } else {
-            // Log les autres lignes importantes (registration, etc.)
-            // Mais pas les lignes trop verbales
-            if (level <= 4) {  // Uniquement WARNING et au-dessus
-                LOGI("=== SIP TRAME [L%d] %s", level, log_buf);
-            }
+            // Toutes les autres lignes aussi (ne pas filtrer)
+            LOGI("=== SIP LOG [OTHER] %s", log_buf);
         }
     }
 }
@@ -215,11 +218,17 @@ static void on_reg_state(pjsua_acc_id acc_id) {
     emit_event("registration", message.c_str());
 }
 
+static std::map<pjsua_buddy_id, int> g_buddy_callback_counter;  // Track how many times on_buddy_state is called per buddy
+
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // Callback appelé quand l'état du buddy change
     // Ceci peut être appelé plusieurs fois: initial SENT, après 401 retry, après 200 OK, après NOTIFY
     pjsua_buddy_info buddy_info;
     pjsua_buddy_get_info(buddy_id, &buddy_info);
+    
+    // Compter les appels au callback
+    g_buddy_callback_counter[buddy_id]++;
+    int call_count = g_buddy_callback_counter[buddy_id];
     
     // Convertir sub_state en string lisible
     const char *sub_state_str = "UNKNOWN";
@@ -233,9 +242,10 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     }
     
     // SIP TRACE: Afficher le code de statut SIP (401, 200, etc.)
-    LOGI("=== SIP TRACE: on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), sip_status=%d", 
-         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status);
+    LOGI("=== SIP TRACE: on_buddy_state CALL #%d: buddy_id=%d, sub_state=%d(%s), sip_status=%d", 
+         call_count, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status);
     
+    LOGI("=== SIP TRACE: IMPORTANT: This is callback invocation #%d for this buddy (server must have responded)", call_count);
     LOGI("=== SIP TRACE: on_buddy_state DEBUG: uri=%s, monitor_pres=%d, status_text=%s",
          buddy_info.uri.ptr ? buddy_info.uri.ptr : "N/A",
          buddy_info.monitor_pres,
@@ -254,6 +264,7 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     } else if (buddy_info.status == 401) {
         LOGW("=== SIP TRACE: RECEIVED 401 UNAUTHORIZED! Server rejected SUBSCRIBE without Digest auth");
         LOGW("=== SIP TRACE: PJSIP should retry with acc_id=%d credentials", g_acc_id);
+        LOGW("=== SIP TRACE: CRITICAL: If this is the first 401 and we don't see another callback, subscription state machine is stuck");
     } else if (buddy_info.status == 200) {
         LOGI("=== SIP TRACE: RECEIVED 200 OK! Digest auth successful or not required");
     } else if (buddy_info.status > 0) {
@@ -269,8 +280,10 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         // Si le buddy reste en SENT avec status=401, c'est un problème d'authentification
         // PJSIP devrait automatiquement retrier avec les credentials du compte (acc_id=g_acc_id)
         if (buddy_info.status == 401) {
-            LOGW(">>> on_buddy_state: Buddy in SENT state with 401 Unauthorized. Waiting for PJSIP retry with Digest auth...");
-            LOGW(">>> on_buddy_state: IMPORTANT: Check that acc_id=%d is linked to account with credentials!", g_acc_id);
+            LOGW(">>> on_buddy_state: Buddy in SENT state with 401 Unauthorized.");
+            LOGW(">>> on_buddy_state: Attempting manual pjsua_buddy_subscribe_pres to force Digest auth retry...");
+            pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
+            LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
         } else if (buddy_info.status == 0) {
             LOGW(">>> on_buddy_state: Buddy in SENT state with status=0 (no response). Check network connection!");
             LOGW(">>> on_buddy_state: Device may not be reachable from app network, or firewall blocking port 5060");
