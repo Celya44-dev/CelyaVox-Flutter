@@ -271,8 +271,6 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
     } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
         LOGI(">>> on_buddy_state: Subscription SENT - PJSIP will retry with acc_id=%d credentials if needed", g_acc_id);
-        }
-        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → waiting for response from server");
     } else {
         LOGI(">>> on_buddy_state: Subscription state=%s (not SENT, not ACTIVE) → monitoring...", sub_state_str);
     }
