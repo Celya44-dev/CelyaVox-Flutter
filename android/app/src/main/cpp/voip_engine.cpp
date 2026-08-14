@@ -188,8 +188,14 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         case PJSIP_EVSUB_STATE_TERMINATED:sub_state_str = "TERMINATED"; break;
     }
     
-    LOGI(">>> on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d", 
-         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status);
+    LOGI(">>> on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d, status_text=%s", 
+         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
+    
+    // DEBUG: Afficher les infos détaillées du buddy
+    LOGI(">>> on_buddy_state DEBUG: uri=%s, monitor_presence=%d, sub_dlg_state=%d",
+         buddy_info.uri.ptr ? buddy_info.uri.ptr : "N/A",
+         buddy_info.monitor_presence,
+         buddy_info.sub_dlg_state);
     
     // Parser le status de présence
     const char *presence_status = "offline";
@@ -197,7 +203,14 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         presence_status = "available";
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
     } else {
-        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → presence_status=offline", sub_state_str);
+        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → checking status=%d for auth failures...", sub_state_str, buddy_info.status);
+        // Status codes: 0=OK, 401=Unauthorized, 407=Proxy auth needed, etc.
+        if (buddy_info.status == 401 || buddy_info.status == 407) {
+            LOGE(">>> on_buddy_state: Got auth challenge (status=%d) - credentials should retry SUBSCRIBE", buddy_info.status);
+        } else if (buddy_info.status != 0 && buddy_info.status != 200) {
+            LOGW(">>> on_buddy_state: Unexpected status=%d (%s) - may indicate server error or network issue", 
+                 buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
+        }
     }
     
     // Lookup du contact depuis la reverse map
@@ -620,7 +633,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
     buddy_cfg.subscribe = PJ_TRUE;  // Activer la subscription de présence
-    // NOTE: Le buddy utilisera les credentials du compte g_acc_id par défaut
+    // NOTE: Le buddy utilisera les credentials du compte g_acc_id par défaut (pas de champ acc_id dans pjsua_buddy_config)
+    LOGI(">>> nativeSubscribePresence: buddy will use default account (g_acc_id=%d) credentials for 401 Digest auth", g_acc_id);
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     pjsua_buddy_id buddy_id;
