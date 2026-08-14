@@ -10,6 +10,11 @@
 #include <pjsua-lib/pjsua.h>
 #include <pjmedia/audiodev.h>
 
+// Accès à la structure globale PJSUA pour configurer les credentials globaux
+extern "C" {
+    extern pjsua_var_t pjsua_var;
+}
+
 #define LOG_TAG "PjsipNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
@@ -24,6 +29,12 @@ static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::string g_account_username = "";  // Username du compte SIP (pour auth Digest des SUBSCRIBE)
 static std::string g_account_password = "";  // Password du compte SIP (pour auth Digest des SUBSCRIBE)
+static std::string g_account_domain = "";    // Domain du compte SIP
+// Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
+static char g_global_cred_realm_asterisk[32] = "asterisk";
+static char g_global_cred_realm_wildcard[8] = "*";
+static char g_global_cred_username[128] = "";
+static char g_global_cred_password[128] = "";
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
 
@@ -250,9 +261,10 @@ static bool ensure_endpoint() {
 
     pjsua_logging_config log_cfg;
     pjsua_logging_config_default(&log_cfg);
-    log_cfg.console_level = 4;  // INFO level
-    log_cfg.level = 4;          // File level aussi à INFO
+    log_cfg.console_level = 5;  // DEBUG level (plus verbose)
+    log_cfg.level = 5;          // File level aussi
     log_cfg.msg_logging = PJ_TRUE;  // Activer logging des messages SIP
+    log_cfg.decor = PJ_LOG_HAS_SENDER | PJ_LOG_HAS_LEVEL_TEXT;
 
     pjsua_media_config media_cfg;
     pjsua_media_config_default(&media_cfg);
@@ -409,6 +421,37 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     g_account_username = user;
     g_account_password = pass;
     g_account_domain = domain;
+    
+    // IMPORTANT: Copier les credentials au niveau GLOBAL aussi
+    // PJSIP cherche les credentials pour authentifier le SUBSCRIBE dans les credentials globaux
+    // Donc on doit les ajouter là aussi, pas juste au niveau du compte
+    pj_ansi_strcpy(g_global_cred_username, user);
+    pj_ansi_strcpy(g_global_cred_password, pass);
+    
+    // Essayer d'accéder à pjsua_var pour configurer les credentials globaux
+    if (pjsua_var.cred_count < PJSUA_ACC_MAX_PROXIES) {
+        LOGI(">>> nativeRegister: Adding credentials to GLOBAL level (pjsua_var) for buddy SUBSCRIBE auth");
+        
+        // Credential global 1: realm="asterisk"
+        pjsua_var.cred_info[pjsua_var.cred_count].realm = pj_str(g_global_cred_realm_asterisk);
+        pjsua_var.cred_info[pjsua_var.cred_count].scheme = pj_str("digest");
+        pjsua_var.cred_info[pjsua_var.cred_count].username = pj_str(g_global_cred_username);
+        pjsua_var.cred_info[pjsua_var.cred_count].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+        pjsua_var.cred_info[pjsua_var.cred_count].data = pj_str(g_global_cred_password);
+        pjsua_var.cred_count++;
+        
+        if (pjsua_var.cred_count < PJSUA_ACC_MAX_PROXIES) {
+            // Credential global 2: realm="*" (wildcard)
+            pjsua_var.cred_info[pjsua_var.cred_count].realm = pj_str(g_global_cred_realm_wildcard);
+            pjsua_var.cred_info[pjsua_var.cred_count].scheme = pj_str("digest");
+            pjsua_var.cred_info[pjsua_var.cred_count].username = pj_str(g_global_cred_username);
+            pjsua_var.cred_info[pjsua_var.cred_count].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+            pjsua_var.cred_info[pjsua_var.cred_count].data = pj_str(g_global_cred_password);
+            pjsua_var.cred_count++;
+        }
+        LOGI(">>> nativeRegister: Global credentials configured! Total global cred_count=%d", pjsua_var.cred_count);
+    }
+    
     LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s (credentials saved for BLF SUBSCRIBE)", user, domain);
 
     env->ReleaseStringUTFChars(juser, user);
