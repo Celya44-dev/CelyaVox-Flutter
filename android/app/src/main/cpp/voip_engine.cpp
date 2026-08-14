@@ -360,12 +360,24 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
 
     acc_cfg.id = pj_str_t{const_cast<char *>(id.c_str()), static_cast<pj_ssize_t>(strlen(id.c_str()))};
     acc_cfg.reg_uri = pj_str_t{const_cast<char *>(reg_uri.c_str()), static_cast<pj_ssize_t>(strlen(reg_uri.c_str()))};
-    acc_cfg.cred_count = 1;
-    acc_cfg.cred_info[0].realm = pj_str_t{const_cast<char *>("*"), 1};
+    
+    // Ajouter 2 credentials: une pour realm spécifique et une wildcard
+    // Ça garantit que PJSIP peut matcher le realm du serveur (ex: "asterisk")
+    acc_cfg.cred_count = 2;
+    
+    // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
+    acc_cfg.cred_info[0].realm = pj_str_t{const_cast<char *>("asterisk"), 8};
     acc_cfg.cred_info[0].scheme = pj_str_t{const_cast<char *>("digest"), 6};
     acc_cfg.cred_info[0].username = pj_str_t{const_cast<char *>(user), static_cast<pj_ssize_t>(strlen(user))};
     acc_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
     acc_cfg.cred_info[0].data = pj_str_t{const_cast<char *>(pass), static_cast<pj_ssize_t>(strlen(pass))};
+    
+    // Credential 2: realm="*" (wildcard pour les autres realms)
+    acc_cfg.cred_info[1].realm = pj_str_t{const_cast<char *>("*"), 1};
+    acc_cfg.cred_info[1].scheme = pj_str_t{const_cast<char *>("digest"), 6};
+    acc_cfg.cred_info[1].username = pj_str_t{const_cast<char *>(user), static_cast<pj_ssize_t>(strlen(user))};
+    acc_cfg.cred_info[1].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+    acc_cfg.cred_info[1].data = pj_str_t{const_cast<char *>(pass), static_cast<pj_ssize_t>(strlen(pass))};
 
     if (proxy && std::string(proxy).length() > 0) {
         acc_cfg.proxy[0] = pj_str_t{const_cast<char *>(proxy), static_cast<pj_ssize_t>(strlen(proxy))};
