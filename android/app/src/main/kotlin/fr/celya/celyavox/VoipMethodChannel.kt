@@ -67,10 +67,10 @@ class VoipMethodChannel(
                     }
                     
                     // FIX: If no explicit proxy configured, use domain as proxy
-                    // This ensures SIP requests are routed through the domain server
+                    // PJSIP expects proxy in format "sip:host" or "sip:host:port"
                     if (proxy.isEmpty()) {
-                        proxy = domain  // domain is guaranteed non-null at this point
-                        android.util.Log.i("VoipMethodChannel", "    >>> PROXY WAS EMPTY - using domain as proxy: $proxy")
+                        proxy = "sip:$domain"  // domain is guaranteed non-null at this point
+                        android.util.Log.i("VoipMethodChannel", "    >>> PROXY WAS EMPTY - formatted as: $proxy")
                     }
                     
                     android.util.Log.i("VoipMethodChannel", "    >>> Calling engine.register() with proxy=$proxy")
