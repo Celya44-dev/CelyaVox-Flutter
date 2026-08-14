@@ -23,6 +23,7 @@ static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
 static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
+static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
 
 static void ensure_pj_thread_registered(const char *name) {
     if (pj_thread_is_registered()) return;
@@ -173,11 +174,38 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // PJSIP gère automatiquement les SUBSCRIBE/NOTIFY
     LOGI(">>> on_buddy_state CALLED: buddy_id=%d (PJSIP received NOTIFY from server)", buddy_id);
     
-    // Émettre un événement pour notifier Dart
-    char buf[32];
-    pj_ansi_snprintf(buf, sizeof(buf), "%d", buddy_id);
-    LOGI(">>> Emitting presence_updated event with buddy_id=%d", buddy_id);
-    emit_event("presence_updated", buf);
+    // Récupérer les infos du buddy pour extraire le status de présence
+    pjsua_buddy_info buddy_info;
+    pjsua_buddy_get_info(buddy_id, &buddy_info);
+    
+    // Parser le status de présence: PJSIP_EVSUB_STATE_ACTIVE = subscription active (on reçoit les NOTIFY)
+    const char *presence_status = "offline";
+    LOGI(">>> on_buddy_state: buddy_id=%d, sub_state=%d, status=%d", buddy_id, buddy_info.sub_state, buddy_info.status);
+    
+    if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
+        // Subscription active = on reçoit les NOTIFY du serveur = contact AVAILABLE
+        presence_status = "available";
+        LOGI(">>> on_buddy_state: Subscription ACTIVE → presence_status=available");
+    } else {
+        // Pas de subscription active = contact OFFLINE
+        presence_status = "offline";
+        LOGI(">>> on_buddy_state: Subscription NOT active (sub_state=%d) → presence_status=offline", buddy_info.sub_state);
+    }
+    
+    // Lookup du contact depuis la reverse map (plutôt que d'appeler JNI depuis Kotlin)
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::string contact = "";
+    auto it = g_buddy_reverse_map.find(buddy_id);
+    if (it != g_buddy_reverse_map.end()) {
+        contact = it->second;
+    }
+    LOGI(">>> on_buddy_state: buddy_id=%d, contact=%s", buddy_id, contact.c_str());
+    
+    // Format: "contact:status" (contact ET status, pas besoin de JNI lookup)
+    char event_data[256];
+    pj_ansi_snprintf(event_data, sizeof(event_data), "%s:%s", contact.c_str(), presence_status);
+    LOGI(">>> Emitting presence_updated event: %s", event_data);
+    emit_event("presence_updated", event_data);
 }
 
 static bool ensure_endpoint() {
@@ -520,7 +548,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeGetCallerInfo(JNIEnv *env, jobject, jst
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject, jstring jcontact) {
+Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject, jstring jcontact, jstring jprefix) {
     ensure_pj_thread_registered("jni");
     if (!ensure_endpoint()) return JNI_FALSE;
     if (g_acc_id == PJSUA_INVALID_ID) {
@@ -529,7 +557,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     }
     
     const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
-    LOGI(">>> nativeSubscribePresence CALLED: contact=%s", contact_str);
+    const char *prefix_str = env->GetStringUTFChars(jprefix, nullptr);
+    LOGI(">>> nativeSubscribePresence CALLED: contact=%s, prefix=%s", contact_str, prefix_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Vérifier si déjà subscribé
@@ -537,19 +566,28 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     if (it != g_buddy_subscriptions.end()) {
         LOGI(">>> nativeSubscribePresence: already subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_TRUE;
     }
+    
+    // Construire le contact final avec prefix si fourni
+    std::string contact_with_prefix = std::string(contact_str);
+    if (prefix_str && strlen(prefix_str) > 0 && contact_with_prefix.find(prefix_str) != 0) {
+        contact_with_prefix = std::string(prefix_str) + contact_str;
+    }
+    LOGI(">>> nativeSubscribePresence: final_contact_with_prefix=%s", contact_with_prefix.c_str());
     
     // Construire un URI SIP valide: sip:contact@domain
     if (g_account_domain.empty()) {
         LOGE(">>> nativeSubscribePresence: account domain not available, cannot subscribe");
         env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_FALSE;
     }
     
     // Buffer pour l'URI SIP
     char buddy_uri_buf[256];
-    pj_ansi_snprintf(buddy_uri_buf, sizeof(buddy_uri_buf), "sip:%s@%s", contact_str, g_account_domain.c_str());
+    pj_ansi_snprintf(buddy_uri_buf, sizeof(buddy_uri_buf), "sip:%s@%s", contact_with_prefix.c_str(), g_account_domain.c_str());
     LOGI(">>> nativeSubscribePresence: constructed buddy URI=%s", buddy_uri_buf);
     
     // Configuration du buddy pour SUBSCRIBE/NOTIFY de présence
@@ -564,14 +602,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     if (status != PJ_SUCCESS) {
         LOGE(">>> nativeSubscribePresence: pjsua_buddy_add FAILED for %s (status=%d)", contact_str, status);
         env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_FALSE;
     }
     
-    // Tracker la subscription
+    // Tracker la subscription dans les deux maps (subscription + reverse pour on_buddy_state lookup)
     g_buddy_subscriptions[contact_str] = buddy_id;
-    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, sending SUBSCRIBE to server for: %s", buddy_id, contact_str);
+    g_buddy_reverse_map[buddy_id] = contact_str;  // Enable C++ lookup without JNI
+    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, tracked in reverse_map, sending SUBSCRIBE to server for: %s", buddy_id, contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
+    env->ReleaseStringUTFChars(jprefix, prefix_str);
     return JNI_TRUE;
 }
 
@@ -605,7 +646,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     }
     
     g_buddy_subscriptions.erase(it);
-    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s", contact_str);
+    g_buddy_reverse_map.erase(buddy_id);  // Also clean up reverse map
+    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s, cleaned reverse_map", contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     return JNI_TRUE;

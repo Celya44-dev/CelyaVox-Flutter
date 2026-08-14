@@ -158,6 +158,13 @@ class VoipMethodChannel(
                     engine.endCall(callId)
                     result.success(null)
                 }
+                "subscribePresence" -> {
+                    val contact = requireArgument<String>(call, "contact")
+                    val prefix = call.argument<String>("prefix") ?: ""
+                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact, prefix=$prefix")
+                    engine.subscribePresence(contact, prefix)
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: IllegalArgumentException) {

@@ -137,7 +137,7 @@ class _DialpadPageState extends State<DialpadPage> {
       try {
         print('>>> BG: Subscribing to ${contact.number}...');
         await _subscribePresenceWithPrefix(contact.number)
-            .timeout(const Duration(seconds: 5), onTimeout: () {
+            .timeout(const Duration(seconds: 5), onTimeout: () async {
           print('>>> BG: Subscription timeout for ${contact.number}');
         });
         print('>>> BG: ✓ Subscribed to ${contact.number}');
@@ -151,8 +151,9 @@ class _DialpadPageState extends State<DialpadPage> {
     // Attendre toutes les subscriptions (ou timeout global)
     try {
       await Future.wait(futures)
-          .timeout(const Duration(seconds: 30), onTimeout: () {
+          .timeout(const Duration(seconds: 30), onTimeout: () async {
         print('>>> BG: Overall subscription timeout (30s)');
+        return <void>[];
       });
     } catch (e) {
       print('>>> BG: Error waiting for subscriptions: $e');

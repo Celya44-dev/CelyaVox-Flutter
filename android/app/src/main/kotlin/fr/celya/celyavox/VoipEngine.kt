@@ -143,6 +143,12 @@ class VoipEngine(
         return sipEngine.refreshAudio()
     }
 
+    fun subscribePresence(contact: String, prefix: String = "") {
+        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact, prefix=$prefix")
+        sipEngine.subscribePresence(contact, prefix)
+        Log.i(TAG, ">>> VoipEngine.subscribePresence DONE for $contact")
+    }
+
     private fun initCallAudio() {
         val ctx = appContext ?: return
         val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -545,6 +551,29 @@ class VoipEngine(
                     handleCallCancelled(ctx, message)
                 } else {
                     Log.w(TAG, "appContext is null, cannot handle call cancellation")
+                }
+            }
+            "presence_updated" -> {
+                // Message format: "contact:status" (C++ envoie déjà le contact + status)
+                Log.i(TAG, ">>> presence_updated event: message=$message")
+                val parts = message.split(":", limit = 2)
+                if (parts.size == 2) {
+                    val contact = parts[0]
+                    val status = parts[1]
+                    if (contact.isNotEmpty()) {
+                        Log.i(TAG, ">>> presence_updated: contact=$contact, status=$status")
+                        emit(
+                            mapOf(
+                                "type" to "presence_state",
+                                "number" to contact,
+                                "state" to status,
+                            )
+                        )
+                    } else {
+                        Log.w(TAG, ">>> presence_updated: contact empty in message '$message'")
+                    }
+                } else {
+                    Log.w(TAG, ">>> presence_updated: invalid format, expected 'contact:status', got '$message'")
                 }
             }
             else -> {
