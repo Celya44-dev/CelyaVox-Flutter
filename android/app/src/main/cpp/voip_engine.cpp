@@ -81,6 +81,16 @@ static void pjsip_log_callback(int level, const char *data, int len) {
             LOGI("=== SIP MSG [REGISTER] %s", log_buf);
         } else if (strstr(log_buf, "WWW-Authenticate") || strstr(log_buf, "Authorization")) {
             LOGW("=== SIP MSG [AUTH] %s", log_buf);
+        } else if (strstr(log_buf, "Contact")) {
+            LOGI("=== SIP MSG [CONTACT] %s", log_buf);
+        } else if (strstr(log_buf, "transport") || strstr(log_buf, "Transport")) {
+            LOGI("=== SIP MSG [TRANSPORT] %s", log_buf);
+        } else if (strstr(log_buf, "route") || strstr(log_buf, "Route") || strstr(log_buf, "server")) {
+            LOGI("=== SIP MSG [ROUTING] %s", log_buf);
+        } else if (strstr(log_buf, "tsxacb") || strstr(log_buf, "tsx") || strstr(log_buf, "transaction")) {
+            LOGI("=== SIP MSG [TRANSACTION] %s", log_buf);
+        } else if (strstr(log_buf, "failure") || strstr(log_buf, "error") || strstr(log_buf, "FAILED")) {
+            LOGW("=== SIP MSG [ERROR] %s", log_buf);
         } else if (strstr(log_buf, "SIP/2.0")) {
             // Toute ligne contenant SIP/2.0 (request ou response)
             LOGI("=== SIP MSG [SIP FRAME] %s", log_buf);
@@ -173,11 +183,20 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     LOGI("=== CALL STATE: call_id=%d, state=%d(%s), last_status=%d, media_cnt=%u",
          call_id, ci.state, state_str, ci.last_status, ci.media_cnt);
     
-    // DEBUG: Check if this is a 401 response
+    // DEBUG: Capture ALL response codes
+    if (ci.last_status > 0) {
+        LOGI("=== CALL STATE: RESPONSE RECEIVED - code=%d, text=%s",
+             ci.last_status, 
+             ci.last_status_text.ptr ? ci.last_status_text.ptr : "N/A");
+    }
+    
+    // DEBUG: Check for 401 and capture more details
     if (ci.last_status == 401) {
-        LOGW(">>> CALL STATE: RECEIVED 401 UNAUTHORIZED!");
-        LOGW(">>> CALL STATE: INVITE retry should happen automatically with Digest auth from account %d", g_acc_id);
-        LOGW(">>> CALL STATE: If no retry seen in logs, check if allow_contact_rewrite/allow_via_rewriting are preventing it");
+        LOGW(">>> CALL STATE: *** 401 UNAUTHORIZED RECEIVED ***");
+        LOGW(">>> CALL STATE: Call ID=%d, state=%s", call_id, state_str);
+        LOGW(">>> CALL STATE: PJSIP should automatically retry with Digest auth from account %d", g_acc_id);
+        LOGW(">>> CALL STATE: Check logs for [TRANSPORT] and [ROUTING] to see how retry is routed");
+        LOGW(">>> CALL STATE: If 'Unsupported transport' error follows, server returned Contact with incompatible transport");
     }
     
     if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
@@ -483,15 +502,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
+    // Don't add ;transport=udp to account URI - let PJSIP negotiate
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s;transport=udp", user, domain);
+             "sip:%s@%s", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s;transport=udp", domain);
+             "sip:%s", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
     
-    LOGI(">>> nativeRegister: Account URIs with forced UDP transport:");
+    LOGI(">>> nativeRegister: Account URIs (in static buffers for persistence):");
     LOGI("    - id=%s", g_global_acc_id);
     LOGI("    - reg_uri=%s", g_global_acc_reg_uri);
     acc_cfg.cred_count = 2;
@@ -522,15 +542,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        // Force UDP transport to avoid TLS/STUN issues from server
-        // Some servers return contacts with unsupported transports (TLS, STUN, etc.)
-        // Forcing transport=udp ensures all SIP requests use UDP
+        // Use proxy as-is without forcing transport
+        // Let PJSIP negotiate transport naturally
         memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
         snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
-                 "%s;transport=udp", proxy);
+                 "%s", proxy);
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy with forced UDP transport: %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy configured: %s", g_global_proxy_with_transport);
     }
 
     // PJSIP 2.17: Enable shared authentication session
