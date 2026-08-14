@@ -83,14 +83,25 @@ static void pjsip_log_callback(int level, const char *data, int len) {
             LOGW("=== SIP MSG [AUTH] %s", log_buf);
         } else if (strstr(log_buf, "Contact")) {
             LOGI("=== SIP MSG [CONTACT] %s", log_buf);
-        } else if (strstr(log_buf, "transport") || strstr(log_buf, "Transport")) {
-            LOGI("=== SIP MSG [TRANSPORT] %s", log_buf);
-        } else if (strstr(log_buf, "route") || strstr(log_buf, "Route") || strstr(log_buf, "server")) {
-            LOGI("=== SIP MSG [ROUTING] %s", log_buf);
-        } else if (strstr(log_buf, "tsxacb") || strstr(log_buf, "tsx") || strstr(log_buf, "transaction")) {
+        } else if (strstr(log_buf, "Via")) {
+            LOGI("=== SIP MSG [VIA] %s", log_buf);
+        } else if (strstr(log_buf, "Route")) {
+            LOGI("=== SIP MSG [ROUTE] %s", log_buf);
+        } else if (strstr(log_buf, "target") || strstr(log_buf, "Target") || strstr(log_buf, "server") || strstr(log_buf, "Server")) {
+            LOGW("=== SIP MSG [TARGET] %s", log_buf);
+        } else if (strstr(log_buf, "transport") || strstr(log_buf, "Transport") || 
+                   strstr(log_buf, "udp") || strstr(log_buf, "tcp") || strstr(log_buf, "tls")) {
+            LOGW("=== SIP MSG [TRANSPORT] %s", log_buf);
+        } else if (strstr(log_buf, "tsx") || strstr(log_buf, "tsxacb") || strstr(log_buf, "transaction")) {
             LOGI("=== SIP MSG [TRANSACTION] %s", log_buf);
-        } else if (strstr(log_buf, "failure") || strstr(log_buf, "error") || strstr(log_buf, "FAILED")) {
+        } else if (strstr(log_buf, "Unsupported") || strstr(log_buf, "FAILED") || 
+                   strstr(log_buf, "Error") || strstr(log_buf, "error") || 
+                   strstr(log_buf, "failure") || strstr(log_buf, "Failure") ||
+                   strstr(log_buf, "Temporary failure")) {
             LOGW("=== SIP MSG [ERROR] %s", log_buf);
+        } else if (strstr(log_buf, "next server") || strstr(log_buf, "Next server") || 
+                   strstr(log_buf, "will try")) {
+            LOGW("=== SIP MSG [FAILOVER] %s", log_buf);
         } else if (strstr(log_buf, "SIP/2.0")) {
             // Toute ligne contenant SIP/2.0 (request ou response)
             LOGI("=== SIP MSG [SIP FRAME] %s", log_buf);
@@ -640,7 +651,20 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
     snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
     
-    LOGI("nativeMakeCall: Making call to %s (stored in static buffer for auth retry)", g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
+    
+    // DEBUG: Show account configuration before INVITE
+    pjsua_acc_info acc_info;
+    if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
+        LOGI(">>> nativeMakeCall: Account Config:");
+        LOGI("    Account ID: %d", g_acc_id);
+        LOGI("    Username: %s", g_global_cred_username);
+        LOGI("    Proxy: %s", g_global_proxy_with_transport);
+        LOGI("    Account URI: %s", g_global_acc_id);
+    }
+    
+    LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: If 401 Unauthorized received, PJSIP should auto-retry with Digest auth");
     
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
@@ -650,7 +674,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     env->ReleaseStringUTFChars(jnumber, number);
     
-    LOGI("nativeMakeCall: pjsua_call_make_call returned status=%d, call_id=%d", status, call_id);
+    LOGI(">>> nativeMakeCall: pjsua_call_make_call returned status=%d, call_id=%d", status, call_id);
+    if (status != PJ_SUCCESS) {
+        char errbuf[128];
+        pj_strerror(status, errbuf, sizeof(errbuf));
+        LOGE(">>> nativeMakeCall: INVITE send FAILED immediately: %s", errbuf);
+    } else {
+        LOGI(">>> nativeMakeCall: INVITE sent, waiting for response (401/180/183/etc)");
+    }
     
     if (status == PJMEDIA_EAUD_NODEFDEV) {
         LOGE("nativeMakeCall: No audio device. Retrying with null sound device.");
