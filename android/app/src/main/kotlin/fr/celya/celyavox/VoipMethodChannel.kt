@@ -52,11 +52,26 @@ class VoipMethodChannel(
                     val username = provisioningManager.getSipUsername()
                     val password = provisioningManager.getSipPassword()
                     val domain = provisioningManager.getSipDomain()
-                    val proxy = provisioningManager.getSipProxy() ?: ""
+                    var proxy = provisioningManager.getSipProxy() ?: ""
+                    
+                    // DEBUG: Log provisioning data
+                    android.util.Log.i("VoipMethodChannel", ">>> registerProvisioned DEBUG:")
+                    android.util.Log.i("VoipMethodChannel", "    username=$username")
+                    android.util.Log.i("VoipMethodChannel", "    domain=$domain")
+                    android.util.Log.i("VoipMethodChannel", "    proxy_from_storage=$proxy (empty=${proxy.isEmpty()})")
+                    
+                    // FIX: If no explicit proxy configured, use domain as proxy
+                    // This ensures SIP requests are routed through the domain server
+                    if (proxy.isEmpty()) {
+                        proxy = domain
+                        android.util.Log.i("VoipMethodChannel", "    >>> PROXY WAS EMPTY - using domain as proxy: $proxy")
+                    }
+                    
                     if (username.isNullOrBlank() || password.isNullOrBlank() || domain.isNullOrBlank()) {
                         result.error("PROVISIONING", "Missing SIP provisioning data", null)
                         return
                     }
+                    android.util.Log.i("VoipMethodChannel", "    >>> Calling engine.register() with proxy=$proxy")
                     engine.register(username, password, domain, proxy)
                     result.success(null)
                 }

@@ -484,6 +484,12 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     const char *pass = env->GetStringUTFChars(jpass, nullptr);
     const char *domain = env->GetStringUTFChars(jdomain, nullptr);
     const char *proxy = env->GetStringUTFChars(jproxy, nullptr);
+    
+    LOGI(">>> nativeRegister: Called with parameters:");
+    LOGI("    - user=%s", user ? user : "NULL");
+    LOGI("    - domain=%s", domain ? domain : "NULL");
+    LOGI("    - proxy=%s (length=%lu)", proxy ? proxy : "NULL", proxy ? strlen(proxy) : 0);
+    LOGI("    - proxy is empty? %s", (proxy == nullptr || strlen(proxy) == 0) ? "YES" : "NO");
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -560,7 +566,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
                  "%s", proxy);
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy configured: %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy CONFIGURED: %s", g_global_proxy_with_transport);
+    } else {
+        acc_cfg.proxy_cnt = 0;
+        LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
     }
 
     // PJSIP 2.17: Enable shared authentication session
@@ -656,11 +665,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
     if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
-        LOGI(">>> nativeMakeCall: Account Config:");
+        LOGI(">>> nativeMakeCall: Account Config from pjsua_acc_get_info:");
         LOGI("    Account ID: %d", g_acc_id);
         LOGI("    Username: %s", g_global_cred_username);
-        LOGI("    Proxy: %s", g_global_proxy_with_transport);
+        LOGI("    Proxy COUNT: %u (should be 1 if configured, 0 if not)", acc_info.proxy_cnt);
+        if (acc_info.proxy_cnt > 0) {
+            LOGI("    Proxy[0]: %.*s", (int)acc_info.proxy[0].slen, acc_info.proxy[0].ptr);
+        } else {
+            LOGW("    *** NO PROXY CONFIGURED - will use DIRECT ROUTING to domain ***");
+        }
         LOGI("    Account URI: %s", g_global_acc_id);
+        LOGI("    Reg URI: %s", g_global_acc_reg_uri);
     }
     
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
