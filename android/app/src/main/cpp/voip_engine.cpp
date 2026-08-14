@@ -456,6 +456,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
+    // CRITICAL: Copy credentials to static buffers BEFORE creating pj_str_t
+    // This ensures they remain valid throughout the account lifetime
+    // (JNI strings will be released after this function)
+    memset(g_global_cred_username, 0, sizeof(g_global_cred_username));
+    memset(g_global_cred_password, 0, sizeof(g_global_cred_password));
+    strncpy(g_global_cred_username, user, sizeof(g_global_cred_username) - 1);
+    strncpy(g_global_cred_password, pass, sizeof(g_global_cred_password) - 1);
+    
+    LOGI(">>> nativeRegister: Credentials copied to static buffers: username=%s", g_global_cred_username);
+
     if (g_acc_id != PJSUA_INVALID_ID) {
         pjsua_acc_del(g_acc_id);
         g_acc_id = PJSUA_INVALID_ID;
@@ -475,18 +485,19 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.cred_count = 2;
     
     // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
-    acc_cfg.cred_info[0].realm = pj_str_t{const_cast<char *>("asterisk"), 8};
+    // IMPORTANT: Use static buffers (g_global_cred_*) not JNI strings!
+    acc_cfg.cred_info[0].realm = pj_str_t{g_global_cred_realm_asterisk, 8};
     acc_cfg.cred_info[0].scheme = pj_str_t{const_cast<char *>("digest"), 6};
-    acc_cfg.cred_info[0].username = pj_str_t{const_cast<char *>(user), static_cast<pj_ssize_t>(strlen(user))};
+    acc_cfg.cred_info[0].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
     acc_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-    acc_cfg.cred_info[0].data = pj_str_t{const_cast<char *>(pass), static_cast<pj_ssize_t>(strlen(pass))};
+    acc_cfg.cred_info[0].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
     
     // Credential 2: realm="*" (wildcard pour les autres realms)
-    acc_cfg.cred_info[1].realm = pj_str_t{const_cast<char *>("*"), 1};
+    acc_cfg.cred_info[1].realm = pj_str_t{g_global_cred_realm_wildcard, 1};
     acc_cfg.cred_info[1].scheme = pj_str_t{const_cast<char *>("digest"), 6};
-    acc_cfg.cred_info[1].username = pj_str_t{const_cast<char *>(user), static_cast<pj_ssize_t>(strlen(user))};
+    acc_cfg.cred_info[1].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
     acc_cfg.cred_info[1].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-    acc_cfg.cred_info[1].data = pj_str_t{const_cast<char *>(pass), static_cast<pj_ssize_t>(strlen(pass))};
+    acc_cfg.cred_info[1].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
 
     if (proxy && std::string(proxy).length() > 0) {
         acc_cfg.proxy[0] = pj_str_t{const_cast<char *>(proxy), static_cast<pj_ssize_t>(strlen(proxy))};
@@ -511,7 +522,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     g_account_password = pass;
     g_account_domain = domain;
     
-    LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials saved for BLF SUBSCRIBE)", user, domain, g_acc_id);
+    LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials from static buffers)", user, domain, g_acc_id);
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
