@@ -151,8 +151,9 @@ class _DialpadPageState extends State<DialpadPage> {
     // Attendre toutes les subscriptions (ou timeout global)
     try {
       await Future.wait(futures)
-          .timeout(const Duration(seconds: 30), onTimeout: () async {
+          .timeout(const Duration(seconds: 30), onTimeout: () {
         print('>>> BG: Overall subscription timeout (30s)');
+        return [];
       });
     } catch (e) {
       print('>>> BG: Error waiting for subscriptions: $e');
