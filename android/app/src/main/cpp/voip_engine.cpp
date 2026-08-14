@@ -659,7 +659,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp", number);
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
     
