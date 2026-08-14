@@ -121,30 +121,18 @@ class PjsipEngine private constructor() {
     fun hangupCall(callId: String): Boolean {
         val ready = initialized.get()
         if (!ready) {
-            Log.e(TAG, "hangupCall ERROR: engine not initialized for callId=$callId")
+            Log.w(TAG, "hangupCall ignored: engine not initialized")
             return false
         }
         val normalized = callId.trim()
-        if (normalized.isEmpty()) {
-            Log.e(TAG, "hangupCall ERROR: empty callId")
-            return false
-        }
-        val callIdInt = normalized.toIntOrNull()
-        if (callIdInt == null) {
-            Log.e(TAG, "hangupCall ERROR: callId is not a valid integer: $normalized")
+        if (normalized.isEmpty() || normalized.toIntOrNull() == null) {
+            Log.w(TAG, "hangupCall ignored: invalid callId=$callId")
             return false
         }
         return try {
-            Log.i(TAG, "hangupCall: calling nativeHangupCall with callId=$normalized")
-            val result = nativeHangupCall(normalized)
-            if (!result) {
-                Log.e(TAG, "hangupCall ERROR: nativeHangupCall returned false for callId=$normalized")
-            } else {
-                Log.i(TAG, "hangupCall SUCCESS: BYE should be sent for callId=$normalized")
-            }
-            result
+            nativeHangupCall(normalized)
         } catch (t: Throwable) {
-            Log.e(TAG, "hangupCall ERROR: nativeHangupCall threw exception for callId=$callId", t)
+            Log.e(TAG, "nativeHangupCall failed for callId=$callId", t)
             false
         }
     }
@@ -171,10 +159,10 @@ class PjsipEngine private constructor() {
     }
 
     @Synchronized
-    fun subscribePresence(contact: String, prefix: String = ""): Boolean {
-        Log.i(TAG, ">>> PjsipEngine.subscribePresence: contact=$contact, prefix=$prefix, initialized=${initialized.get()}")
+    fun subscribePresence(contact: String): Boolean {
+        Log.i(TAG, ">>> PjsipEngine.subscribePresence: contact=$contact, initialized=${initialized.get()}")
         if (!initialized.get()) init()
-        val result = nativeSubscribePresence(contact, prefix)
+        val result = nativeSubscribePresence(contact)
         Log.i(TAG, ">>> PjsipEngine.subscribePresence result: $result")
         return result
     }
@@ -201,15 +189,6 @@ class PjsipEngine private constructor() {
         return nativeGetPresenceStatus(contact)
     }
 
-    fun getContactForBuddy(buddyId: Int): String {
-        Log.i(TAG, ">>> PjsipEngine.getContactForBuddy: buddyId=$buddyId, initialized=${initialized.get()}")
-        if (!initialized.get()) {
-            Log.w(TAG, ">>> PjsipEngine.getContactForBuddy: engine not initialized")
-            return ""
-        }
-        return nativeGetContactForBuddy(buddyId)
-    }
-
     private external fun nativeInit(): Boolean
     private external fun nativeRegister(username: String, password: String, domain: String, proxy: String): Boolean
     private external fun nativeUnregister()
@@ -219,8 +198,7 @@ class PjsipEngine private constructor() {
     private external fun nativeRefreshAudio(): Boolean
     private external fun nativeSendDtmf(callId: String, digits: String): Boolean
     private external fun nativeGetCallerInfo(callId: String): String?
-    private external fun nativeSubscribePresence(contact: String, prefix: String): Boolean
+    private external fun nativeSubscribePresence(contact: String): Boolean
     private external fun nativeUnsubscribePresence(contact: String): Boolean
     private external fun nativeGetPresenceStatus(contact: String): String
-    private external fun nativeGetContactForBuddy(buddyId: Int): String
 }

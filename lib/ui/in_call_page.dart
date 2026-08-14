@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../contacts/saved_contacts_store.dart';
@@ -39,6 +38,7 @@ class _InCallPageState extends State<InCallPage> {
     super.initState();
     _activeCallId = widget.callId;
     _activeCallerId = widget.callerId;
+    AppLogger.instance.log('>>> InCallPage.initState: callId=${widget.callId}, callerId=${widget.callerId}, parseResult=${_parseCallerInfo(widget.callerId)}');
     _ensureMicPermission();
     _loadBluetoothAvailability();
     _loadSavedContact();
@@ -47,25 +47,8 @@ class _InCallPageState extends State<InCallPage> {
 
   @override
   void dispose() {
-    _stopRinging();
     _eventsSub?.cancel();
     super.dispose();
-  }
-
-  void _startRinging({bool isOutgoing = false}) async {
-    try {
-      await widget.engine.startInAppRinging(isOutgoing: isOutgoing);
-    } catch (e) {
-      AppLogger.instance.log('Erreur démarrage ringtone: $e');
-    }
-  }
-
-  void _stopRinging() async {
-    try {
-      await widget.engine.stopInAppRinging();
-    } catch (e) {
-      AppLogger.instance.log('Erreur arrêt ringtone: $e');
-    }
   }
 
   Future<void> _ensureMicPermission() async {
@@ -152,28 +135,26 @@ class _InCallPageState extends State<InCallPage> {
 
   void _listenCallUpdates() {
     _eventsSub = VoipEvents.stream.listen((event) {
-      if (event is CallRingingEvent) {
-        // Outgoing call is ringing (remote party is receiving the call)
-        if (mounted) {
-          _startRinging(isOutgoing: true);
-        }
-      } else if (event is CallConnectedEvent) {
-        _stopRinging();
+      if (event is CallConnectedEvent) {
+        AppLogger.instance.log('>>> InCallPage.CallConnectedEvent: callId=${event.callId}, callerId=${event.callerId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
             _activeCallId = event.callId;
             // Only update callerId if the event has one, preserve the initial value if empty
             if (event.callerId.isNotEmpty) {
               _activeCallerId = event.callerId;
+              AppLogger.instance.log('>>> InCallPage.state updated callerId: _activeCallerId=$_activeCallerId');
+            } else {
+              AppLogger.instance.log('>>> InCallPage.CallConnectedEvent has empty callerId, keeping initial: $_activeCallerId');
             }
           });
         }
       } else if (event is OutgoingCallEvent) {
+        AppLogger.instance.log('>>> InCallPage.OutgoingCallEvent: callId=${event.callId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() => _activeCallId = event.callId);
         }
       } else if (event is CallEndedEvent) {
-        _stopRinging();
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
@@ -248,18 +229,8 @@ class _InCallPageState extends State<InCallPage> {
   Future<void> _hangup() async {
     setState(() => _isHangingUp = true);
     final callId = _activeCallId.isNotEmpty ? _activeCallId : widget.callId;
-    AppLogger.instance.log('>>> _hangup: Attempting to hangup callId=$callId');
-    if (callId.isEmpty) {
-      AppLogger.instance.log('ERROR: _hangup called but callId is empty!');
-      _showMessage('Erreur: ID d\'appel manquant, impossible de raccrocher');
-      if (mounted) {
-        setState(() => _isHangingUp = false);
-      }
-      return;
-    }
     try {
       await widget.engine.hangupCall(callId);
-      AppLogger.instance.log('>>> _hangup: SUCCESS - BYE should be sent');
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
@@ -267,11 +238,7 @@ class _InCallPageState extends State<InCallPage> {
         ),
         (_) => false,
       );
-    } on PlatformException catch (e) {
-      AppLogger.instance.log('ERROR: _hangup failed with PlatformException: code=${e.code}, message=${e.message}');
-      _showMessage('Erreur raccroachage: ${e.message}');
     } catch (e) {
-      AppLogger.instance.log('ERROR: _hangup failed with exception: $e');
       _showMessage('Erreur: $e');
     } finally {
       if (mounted) {
@@ -288,14 +255,10 @@ class _InCallPageState extends State<InCallPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Determine display text: always show caller ID
-    String displayText = '';
-    if (_activeCallerId.isNotEmpty) {
-      displayText = _parseCallerInfo(_activeCallerId);
-    } else if (_savedContactName != null && _savedContactName!.isNotEmpty) {
-      displayText = _savedContactName!;
-    }
-    
+    final displayText = _activeCallerId.isNotEmpty 
+                  ? _parseCallerInfo(_activeCallerId)
+                  : _displayNumber(widget.callId);
+    AppLogger.instance.log('>>> InCallPage.build: _activeCallerId="$_activeCallerId", displayText="$displayText"');
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -306,11 +269,10 @@ class _InCallPageState extends State<InCallPage> {
             children: [
               const Icon(Icons.call, size: 48),
               const SizedBox(height: 12),
-              if (displayText.isNotEmpty)
-                Text(
-                  displayText,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+              Text(
+                displayText,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               if (_savedContactName != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),

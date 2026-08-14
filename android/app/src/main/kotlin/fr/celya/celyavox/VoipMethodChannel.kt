@@ -87,8 +87,7 @@ class VoipMethodChannel(
                     result.success(null)
                 }
                 "startInAppRinging" -> {
-                    val isOutgoing = call.argument<Boolean>("isOutgoing") ?: false
-                    engine.startInAppRinging(isOutgoing)
+                    engine.startInAppRinging()
                     result.success(null)
                 }
                 "stopInAppRinging" -> {
@@ -156,31 +155,8 @@ class VoipMethodChannel(
                 }
                 "hangupCall" -> {
                     val callId = requireArgument<String>(call, "callId")
-                    val ok = engine.endCall(callId)
-                    if (!ok) {
-                        result.error("HANGUP_FAILED", "Failed to hangup call $callId - BYE not sent", null)
-                        return
-                    }
+                    engine.endCall(callId)
                     result.success(null)
-                }
-                "subscribePresence" -> {
-                    val contact = requireArgument<String>(call, "contact")
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.subscribePresence: $contact")
-                    engine.subscribePresence(contact)
-                    result.success(null)
-                }
-                "unsubscribePresence" -> {
-                    val contact = requireArgument<String>(call, "contact")
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.unsubscribePresence: $contact")
-                    engine.unsubscribePresence(contact)
-                    result.success(null)
-                }
-                "getPresenceStatus" -> {
-                    val contact = requireArgument<String>(call, "contact")
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.getPresenceStatus: $contact")
-                    val status = engine.getPresenceStatus(contact)
-                    android.util.Log.i("VoipMethodChannel", ">>> VoipMethodChannel.getPresenceStatus result: $status")
-                    result.success(status)
                 }
                 else -> result.notImplemented()
             }

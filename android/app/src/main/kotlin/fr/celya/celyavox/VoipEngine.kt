@@ -7,8 +7,6 @@ import android.media.AudioManager
 import android.media.AudioDeviceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
-import android.media.AudioFormat
-import android.media.AudioTrack
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -24,8 +22,6 @@ import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import com.google.firebase.messaging.FirebaseMessaging
-import kotlin.math.sin
-import kotlin.math.PI
 
 /**
  * Bridges Flutter to native PJSIP and ConnectionService, relaying events via EventChannel.
@@ -47,11 +43,7 @@ class VoipEngine(
     private var pendingFcmToken: String? = null
     private var pendingConnectedCallId: String? = null
     private var incomingRingtone: Ringtone? = null
-    private var outgoingRingbackTone: Ringtone? = null
     private var incomingVibrator: Vibrator? = null
-    private var ringbackAudioTrack: AudioTrack? = null
-    private var ringbackPlaybackThread: Thread? = null
-    private var ringbackShouldPlay: Boolean = false
     private val callerIdMap = mutableMapOf<String, String>()
 
     init {
@@ -107,12 +99,9 @@ class VoipEngine(
         return sipEngine.makeCall(callee)
     }
 
-    fun endCall(callId: String): Boolean {
+    fun endCall(callId: String) {
         val ok = sipEngine.hangupCall(callId)
         Log.i(TAG, "VoipEngine.endCall callId=$callId ok=$ok")
-        if (!ok) {
-            Log.e(TAG, "ERROR: hangupCall failed for callId=$callId - BYE may not be sent!")
-        }
         appContext?.let { ctx ->
             stopInAppRinging()
             VoipForegroundService.stop(ctx)
@@ -136,11 +125,12 @@ class VoipEngine(
                 Log.w(TAG, "Failed to dispatch ACTION_CALL_TERMINATE_REQUESTED intent", e)
             }
         }
-        return ok
     }
 
     fun acceptCall(callId: String) {
         Log.i(TAG, "VoipEngine.acceptCall callId=$callId")
+        val storedCallerId = callerIdMap.getOrDefault(callId, "")
+        Log.i(TAG, ">>> acceptCall: callerIdMap=$callerIdMap, storedCallerId=\"$storedCallerId\"")
         // Initialize audio for incoming calls (same as for outgoing calls)
         initCallAudio()
         // Activate real audio devices in PJSIP
@@ -151,25 +141,6 @@ class VoipEngine(
 
     fun refreshAudio(): Boolean {
         return sipEngine.refreshAudio()
-    }
-
-    fun subscribePresence(contact: String, prefix: String = "") {
-        Log.i(TAG, ">>> VoipEngine.subscribePresence: contact=$contact, prefix=$prefix")
-        sipEngine.subscribePresence(contact, prefix)
-        Log.i(TAG, ">>> VoipEngine.subscribePresence DONE for $contact")
-    }
-
-    fun unsubscribePresence(contact: String) {
-        Log.i(TAG, ">>> VoipEngine.unsubscribePresence: contact=$contact")
-        sipEngine.unsubscribePresence(contact)
-        Log.i(TAG, ">>> VoipEngine.unsubscribePresence DONE for $contact")
-    }
-
-    fun getPresenceStatus(contact: String): String {
-        Log.i(TAG, ">>> VoipEngine.getPresenceStatus: contact=$contact")
-        val status = sipEngine.getPresenceStatus(contact)
-        Log.i(TAG, ">>> VoipEngine.getPresenceStatus result: $contact -> $status")
-        return status
     }
 
     private fun initCallAudio() {
@@ -405,124 +376,7 @@ class VoipEngine(
         return sipEngine.sendDtmf(callId, digits)
     }
 
-    fun startInAppRinging(isOutgoing: Boolean = false) {
-        val ctx = appContext
-        if (ctx == null) {
-            return
-        }
-        
-        if (isOutgoing) {
-            // Play ringback tone for outgoing calls
-            startOutgoingRingbackTone()
-        } else {
-            // Play ringtone for incoming calls
-            startIncomingRingtone()
-        }
-    }
-
-    private fun startOutgoingRingbackTone() {
-        val ctx = appContext
-        if (ctx == null) {
-            return
-        }
-        if (ringbackAudioTrack != null || ringbackPlaybackThread != null) {
-            return
-        }
-        val audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val ringerMode = audioManager.ringerMode
-        if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
-            return
-        }
-
-        // Set audio mode for outgoing call
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        
-        // Ensure STREAM_VOICE_CALL volume is at maximum
-        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-        audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
-
-        if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            try {
-                // Generate 400 Hz ringback tone synthetically (international standard)
-                ringbackShouldPlay = true
-                ringbackPlaybackThread = Thread {
-                    playRingbackToneSynthetic()
-                }.apply { start() }
-                Log.i(TAG, "Started outgoing ringback tone (440 Hz European pattern: 1.5s ON / 3.5s OFF)")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to start ringback tone: ${e.message}", e)
-                ringbackShouldPlay = false
-            }
-        }
-    }
-
-    private fun playRingbackToneSynthetic() {
-        try {
-            val sampleRate = 44100 // Hz
-            val frequency = 440.0 // Hz (standard European ringback tone)
-            val toneDurationMs = 1500 // 1.5 seconds ON (European standard)
-            val silenceDurationMs = 3500 // 3.5 seconds OFF (European standard)
-            val toneSamples = (sampleRate * toneDurationMs / 1000).toInt()
-            val silenceSamples = (sampleRate * silenceDurationMs / 1000).toInt()
-            
-            val audioFormat = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .build()
-            } else {
-                AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .build()
-            }
-            
-            val bufferSize = AudioTrack.getMinBufferSize(
-                sampleRate,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-            
-            val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build()
-            
-            ringbackAudioTrack = AudioTrack(
-                audioAttributes,
-                audioFormat,
-                bufferSize,
-                AudioTrack.MODE_STREAM,
-                AudioManager.AUDIO_SESSION_ID_GENERATE
-            ).apply { play() }
-            
-            val toneBuffer = ShortArray(toneSamples)
-            val silenceBuffer = ShortArray(silenceSamples)
-            
-            // Generate 440 Hz sine wave (standard European ringback)
-            for (i in 0 until toneSamples) {
-                val sample = ((Short.MAX_VALUE * sin(2 * PI * frequency * i / sampleRate)).toInt()).toShort()
-                toneBuffer[i] = sample
-            }
-            
-            // Play pattern: 1.5 seconds tone + 3.5 seconds silence, repeat
-            while (ringbackShouldPlay && ringbackAudioTrack != null) {
-                ringbackAudioTrack?.write(toneBuffer, 0, toneSamples, AudioTrack.WRITE_BLOCKING)
-                ringbackAudioTrack?.write(silenceBuffer, 0, silenceSamples, AudioTrack.WRITE_BLOCKING)
-            }
-            
-        } catch (e: Exception) {
-            Log.w(TAG, "Error in playRingbackToneSynthetic: ${e.message}", e)
-        } finally {
-            ringbackAudioTrack?.stop()
-            ringbackAudioTrack?.release()
-            ringbackAudioTrack = null
-        }
-    }
-
-    private fun startIncomingRingtone() {
+    fun startInAppRinging() {
         val ctx = appContext
         if (ctx == null) {
             return
@@ -544,7 +398,6 @@ class VoipEngine(
         audioManager.setStreamVolume(AudioManager.STREAM_RING, maxVolume, 0)
 
         if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            // Use system ringtone for incoming calls
             val uri = RingtoneManager.getActualDefaultRingtoneUri(
                 ctx,
                 RingtoneManager.TYPE_RINGTONE
@@ -589,20 +442,6 @@ class VoipEngine(
     fun stopInAppRinging() {
         incomingRingtone?.stop()
         incomingRingtone = null
-        outgoingRingbackTone?.stop()
-        outgoingRingbackTone = null
-        ringbackShouldPlay = false
-        if (ringbackAudioTrack != null) {
-            try {
-                ringbackAudioTrack?.stop()
-                ringbackAudioTrack?.release()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping ringback audio track: ${e.message}")
-            }
-            ringbackAudioTrack = null
-        }
-        ringbackPlaybackThread?.join(100)
-        ringbackPlaybackThread = null
         incomingVibrator?.cancel()
         incomingVibrator = null
     }
@@ -643,7 +482,7 @@ class VoipEngine(
                     val callerId = parseCallerInfo(rawCallerInfo)
                     // Store CallerID for this call
                     callerIdMap[message] = callerId
-                    Log.i(TAG, "INCOMING_CALL: callId=$message, callerId=\"$callerId\"")
+                    Log.i(TAG, ">>> INCOMING_CALL: rawCallerInfo=\"$rawCallerInfo\", parsed callerId=\"$callerId\", callId=$message, map now: $callerIdMap")
                     
                     // Always notify Flutter about the incoming call
                     incomingCall(message, callerId)
@@ -687,15 +526,6 @@ class VoipEngine(
                     )
                 )
             }
-            "call_ringing" -> {
-                Log.i(TAG, "Call RINGING - callId=$message")
-                emit(
-                    mapOf(
-                        "type" to "call_ringing",
-                        "callId" to message,
-                    )
-                )
-            }
             "call_connected" -> {
                 VoipConnectionService.markCallActive(message)
                 // Reset FCM wakeup flag since call is now accepted and active
@@ -717,35 +547,6 @@ class VoipEngine(
                     Log.w(TAG, "appContext is null, cannot handle call cancellation")
                 }
             }
-            "presence_updated" -> {
-                // Message format: "buddy_id:status"
-                Log.i(TAG, ">>> presence_updated event: message=$message")
-                val parts = message.split(":", limit = 2)
-                if (parts.size == 2) {
-                    val buddyIdStr = parts[0]
-                    val status = parts[1]
-                    val buddyId = buddyIdStr.toIntOrNull() ?: -1
-                    if (buddyId >= 0) {
-                        val contact = sipEngine.getContactForBuddy(buddyId)
-                        Log.i(TAG, ">>> presence_updated: buddy_id=$buddyId → contact=$contact, status=$status")
-                        if (contact.isNotEmpty()) {
-                            emit(
-                                mapOf(
-                                    "type" to "presence_state",
-                                    "number" to contact,
-                                    "state" to status,
-                                )
-                            )
-                        } else {
-                            Log.w(TAG, ">>> presence_updated: contact empty for buddy_id=$buddyId")
-                        }
-                    } else {
-                        Log.w(TAG, ">>> presence_updated: invalid buddy_id=$buddyIdStr")
-                    }
-                } else {
-                    Log.w(TAG, ">>> presence_updated: invalid format, expected 'buddy_id:status', got '$message'")
-                }
-            }
             else -> {
                 emit(mapOf("type" to type, "message" to message))
             }
@@ -761,7 +562,7 @@ class VoipEngine(
     }
 
     fun incomingCall(callId: String, callerId: String?) {
-        Log.i(TAG, "incomingCall: callId=$callId, callerId=\"$callerId\"")
+        Log.i(TAG, ">>> incomingCall: sending to Flutter callId=$callId, callerId=\"$callerId\"")
         emit(
             mapOf(
                 "type" to "incoming_call",
@@ -779,7 +580,7 @@ class VoipEngine(
         }
         Log.i(TAG, "Emitting call_connected to Flutter callId=$callId")
         val callerId = callerIdMap.getOrDefault(callId, "")
-        Log.i(TAG, "callConnected: callId=$callId, callerId=\"$callerId\"")
+        Log.i(TAG, ">>> callConnected: callerIdMap=$callerIdMap, callerId for $callId = \"$callerId\"")
         emit(
             mapOf(
                 "type" to "call_connected",

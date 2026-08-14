@@ -116,10 +116,48 @@ class _DialpadPageState extends State<DialpadPage> {
   Future<void> _subscribePresenceWithPrefix(String number) async {
     try {
       final prefix = await ProvisioningChannel.getApiPrefixe();
+      print('>>> _subscribePresenceWithPrefix: number=$number, prefix=$prefix');
       await widget.engine.subscribePresence(number, prefix: prefix);
+      print('>>> _subscribePresenceWithPrefix SUCCESS: $number');
     } catch (e) {
-      await widget.engine.subscribePresence(number);
+      print('>>> _subscribePresenceWithPrefix ERROR: $e (trying without prefix)');
+      try {
+        await widget.engine.subscribePresence(number);
+      } catch (e2) {
+        print('>>> _subscribePresenceWithPrefix FAILED (even without prefix): $e2');
+      }
     }
+  }
+
+  /// Lancer les subscriptions de présence EN ARRIÈRE-PLAN (non-bloquant)
+  Future<void> _subscribeAllPresenceInBackground(List<SavedContact> contacts) async {
+    print('>>> _subscribeAllPresenceInBackground: subscribing to ${contacts.length} contacts');
+    // Lancer les subscriptions en parallèle avec un timeout par contact
+    final futures = contacts.map((contact) async {
+      try {
+        print('>>> BG: Subscribing to ${contact.number}...');
+        await _subscribePresenceWithPrefix(contact.number)
+            .timeout(const Duration(seconds: 5), onTimeout: () {
+          print('>>> BG: Subscription timeout for ${contact.number}');
+        });
+        print('>>> BG: ✓ Subscribed to ${contact.number}');
+        AppLogger.instance.log('[BG] Subscribé à: ${contact.number}');
+      } catch (e) {
+        print('>>> BG: ✗ Error subscribing to ${contact.number}: $e');
+        AppLogger.instance.log('[BG] Erreur sub ${contact.number}: $e');
+      }
+    }).toList();
+    
+    // Attendre toutes les subscriptions (ou timeout global)
+    try {
+      await Future.wait(futures)
+          .timeout(const Duration(seconds: 30), onTimeout: () {
+        print('>>> BG: Overall subscription timeout (30s)');
+      });
+    } catch (e) {
+      print('>>> BG: Error waiting for subscriptions: $e');
+    }
+    print('>>> _subscribeAllPresenceInBackground: DONE');
   }
 
   Future<void> _loadSavedContacts() async {
@@ -136,17 +174,12 @@ class _DialpadPageState extends State<DialpadPage> {
         _savedContacts = contacts;
         _isLoadingSavedContacts = false;
       });
-      // Subscribe à la présence de tous les favoris
-      for (final contact in contacts) {
-        try {
-          print('>>> Subscribing to presence: ${contact.number}');
-          await _subscribePresenceWithPrefix(contact.number);
-          print('>>> ✓ Subscribé à: ${contact.number}');
-          AppLogger.instance.log('Subscribé à: ${contact.number}');
-        } catch (e) {
-          print('>>> ✗ Erreur sub présence ${contact.number}: $e');
-          AppLogger.instance.log('Erreur sub présence ${contact.number}: $e');
-        }
+      
+      // Subscribe à la présence EN ARRIÈRE-PLAN (non-bloquant)
+      // Lancer les subscriptions en parallèle avec timeout
+      if (contacts.isNotEmpty) {
+        print('>>> Launching background subscription tasks for ${contacts.length} contacts');
+        unawaited(_subscribeAllPresenceInBackground(contacts));
       }
       print('>>> _loadSavedContacts DONE');
     } catch (e) {
@@ -516,12 +549,17 @@ class _DialpadPageState extends State<DialpadPage> {
       if (!mounted) return;
       if (isFavorites) {
         setState(() => _savedContacts = updated);
-        // Subscribe à la présence du contact favori
+        // Subscribe à la présence du contact favori EN ARRIÈRE-PLAN (non-bloquant)
         try {
           print('>>> Calling subscribePresence for new favorite: $number');
-          await _subscribePresenceWithPrefix(number);
-          print('>>> ✓ Subscribé à la présence de: $number');
-          AppLogger.instance.log('Subscribé à la présence de: $number');
+          // NE PAS ATTENDRE (fire-and-forget avec unawaited)
+          unawaited(_subscribePresenceWithPrefix(number).then((_) {
+            print('>>> ✓ Subscribé à la présence de: $number');
+            AppLogger.instance.log('Subscribé à la présence de: $number');
+          }).catchError((e) {
+            print('>>> ✗ Erreur sub présence pour $number: $e');
+            AppLogger.instance.log('Erreur subscription présence: $e');
+          }));
         } catch (e) {
           AppLogger.instance.log('Erreur subscription présence: $e');
         }
