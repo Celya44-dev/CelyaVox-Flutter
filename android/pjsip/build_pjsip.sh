@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PJSIP_VERSION="2.14.1"
+PJSIP_VERSION="2.17"
 PJSIP_TARBALL="pjproject-${PJSIP_VERSION}.tar.gz"
 PJSIP_URL="https://github.com/pjsip/pjproject/archive/refs/tags/${PJSIP_VERSION}.tar.gz"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

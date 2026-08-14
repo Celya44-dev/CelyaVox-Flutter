@@ -96,7 +96,7 @@ jobs:
             exit 1
           fi
           echo "Using ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
-          rm -rf android/pjsip/pjproject-2.14.1
+          rm -rf android/pjsip/pjproject-2.17
           chmod +x android/pjsip/build_pjsip.sh
           android/pjsip/build_pjsip.sh
           echo "Listing generated native libs:"
@@ -111,7 +111,7 @@ jobs:
           ls -l android/app/src/main/jniLibs/arm64-v8a || true
           find android/app/src/main/jniLibs/arm64-v8a -type f \( -name "*.so" -o -name "*.a" \) -print || true
           echo "=== Vérification des headers PJSIP ==="
-          if [ -f android/pjsip/pjproject-2.14.1/pjlib/include/pjlib.h ]; then
+          if [ -f android/pjsip/pjproject-2.17/pjlib/include/pjlib.h ]; then
             echo "pjlib.h trouvé"
           else
             echo "pjlib.h manquant !" >&2
@@ -120,8 +120,8 @@ jobs:
 
       - name: Debug libs PJSIP (pjsip/lib)
         run: |
-          echo "=== Contenu de android/pjsip/pjproject-2.14.1/pjsip/lib ==="
-          ls -l android/pjsip/pjproject-2.14.1/pjsip/lib || true
+          echo "=== Contenu de android/pjsip/pjproject-2.17/pjsip/lib ==="
+          ls -l android/pjsip/pjproject-2.17/pjsip/lib || true
 
       - name: Debug symboles PJSIP (libpj.a)
         run: |
@@ -147,10 +147,10 @@ jobs:
         run: |
           echo "=== Contenu de android/pjsip ==="
           ls -l android/pjsip || true
-          echo "=== Contenu de android/pjsip/pjproject-2.14.1 ==="
-          ls -l android/pjsip/pjproject-2.14.1 || true
-          echo "=== Contenu de android/pjsip/pjproject-2.14.1/pjlib/include ==="
-          ls -l android/pjsip/pjproject-2.14.1/pjlib/include || true
+          echo "=== Contenu de android/pjsip/pjproject-2.17 ==="
+          ls -l android/pjsip/pjproject-2.17 || true
+          echo "=== Contenu de android/pjsip/pjproject-2.17/pjlib/include ==="
+          ls -l android/pjsip/pjproject-2.17/pjlib/include || true
 
       - name: Ensure Gradle wrapper executable
         run: chmod +x android/gradlew
@@ -227,11 +227,11 @@ jobs:
       - name: Vérifier les headers PJSIP avant build Flutter
         run: |
           echo "=== Vérification finale des headers PJSIP ==="
-          if [ ! -f android/pjsip/pjproject-2.14.1/pjlib/include/pjlib.h ]; then
+          if [ ! -f android/pjsip/pjproject-2.17/pjlib/include/pjlib.h ]; then
             echo "::error title=Header manquant::pjlib.h non trouvé avant build Flutter"
             exit 1
           fi
-          if [ ! -f android/pjsip/pjproject-2.14.1/pjsip/include/pjsip.h ]; then
+          if [ ! -f android/pjsip/pjproject-2.17/pjsip/include/pjsip.h ]; then
             echo "::error title=Header manquant::pjsip.h non trouvé avant build Flutter"
             exit 1
           fi
