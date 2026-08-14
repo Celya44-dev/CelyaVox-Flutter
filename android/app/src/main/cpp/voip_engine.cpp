@@ -22,6 +22,8 @@ static bool g_initialized = false;
 static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
 static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
+static std::string g_account_username = "";  // Username du compte SIP (pour auth Digest des SUBSCRIBE)
+static std::string g_account_password = "";  // Password du compte SIP (pour auth Digest des SUBSCRIBE)
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
 
@@ -372,6 +374,12 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
 
+    // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
+    g_account_username = user;
+    g_account_password = pass;
+    g_account_domain = domain;
+    LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s (credentials saved for BLF SUBSCRIBE)", user, domain);
+
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
     env->ReleaseStringUTFChars(jdomain, domain);
@@ -595,6 +603,19 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
     buddy_cfg.subscribe = PJ_TRUE;  // Activer la subscription de présence
+    
+    // Ajouter les credentials du compte pour l'authentification Digest des SUBSCRIBE (401 response)
+    if (!g_account_username.empty() && !g_account_password.empty()) {
+        buddy_cfg.cred_count = 1;
+        buddy_cfg.cred_info[0].realm = pj_str_t{const_cast<char *>("*"), 1};  // Wildcard realm
+        buddy_cfg.cred_info[0].scheme = pj_str_t{const_cast<char *>("digest"), 6};
+        buddy_cfg.cred_info[0].username = pj_str(const_cast<char *>(g_account_username.c_str()));
+        buddy_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+        buddy_cfg.cred_info[0].data = pj_str(const_cast<char *>(g_account_password.c_str()));
+        LOGI(">>> nativeSubscribePresence: Configured Digest auth credentials for buddy");
+    } else {
+        LOGW(">>> nativeSubscribePresence: WARNING - No credentials saved (account not registered?)");
+    }
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     pjsua_buddy_id buddy_id;
