@@ -180,7 +180,10 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id, pjsip_r
 static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     (void)e;
     pjsua_call_info ci;
-    if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) return;
+    if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) {
+        LOGE("on_call_state: CRITICAL - pjsua_call_get_info failed for call_id=%d", call_id);
+        return;
+    }
     
     // Convert state to readable string
     const char *state_str = "UNKNOWN";
@@ -192,7 +195,7 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     else if (ci.state == PJSIP_INV_STATE_CONFIRMED) state_str = "CONFIRMED";
     else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) state_str = "DISCONNECTED";
     
-    LOGI("=== CALL STATE: call_id=%d, state=%d(%s), last_status=%d, media_cnt=%u",
+    LOGI("=== CALL STATE UPDATE: call_id=%d, state=%d(%s), last_status=%d, media_cnt=%u",
          call_id, ci.state, state_str, ci.last_status, ci.media_cnt);
     
     // DEBUG: Capture ALL response codes
@@ -202,13 +205,13 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
              ci.last_status_text.ptr ? ci.last_status_text.ptr : "N/A");
     }
     
-    // DEBUG: Check for 401 and capture more details
+    // CRITICAL: Check for 401 - if this appears, 401 WAS received and is being processed
     if (ci.last_status == 401) {
-        LOGW(">>> CALL STATE: *** 401 UNAUTHORIZED RECEIVED ***");
-        LOGW(">>> CALL STATE: Call ID=%d, state=%s", call_id, state_str);
-        LOGW(">>> CALL STATE: PJSIP should automatically retry with Digest auth from account %d", g_acc_id);
-        LOGW(">>> CALL STATE: Check logs for [TRANSPORT] and [ROUTING] to see how retry is routed");
-        LOGW(">>> CALL STATE: If 'Unsupported transport' error follows, server returned Contact with incompatible transport");
+        LOGW(">>> *** 401 UNAUTHORIZED RECEIVED AND BEING PROCESSED ***");
+        LOGW(">>> Call ID=%d, current_state=%s, account_id=%d", call_id, state_str, g_acc_id);
+        LOGW(">>> PJSIP will now attempt to retry INVITE with Digest authentication");
+        LOGW(">>> Expected next action: PJSIP sends new INVITE with Authorization header");
+        LOGW(">>> If this message does NOT appear after INVITE sent, 401 was never received");
     }
     
     if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
@@ -658,8 +661,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     
     // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
+    // IMPORTANT: Include explicit port 5060 to avoid SRV record resolution that returns TCP/TLS
+    // When 401 retry happens, PJSIP must use the same URI (with port) to avoid transport negotiation issues
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp", number);
+    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060;transport=udp", number);
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
     
