@@ -24,9 +24,9 @@
 #define PJMEDIA_HAS_ILBC_CODEC            0
 #define PJMEDIA_HAS_SILK_CODEC            0
 
-/* Audio backend: prefer OpenSL ES on Android */
-#define PJMEDIA_AUDIO_DEV_HAS_OPENSL      1
-#define PJMEDIA_AUDIO_DEV_HAS_ANDROID_JNI 0
+/* Audio backend: use Android JNI (OpenSL ES has issues in 2.17) */
+#define PJMEDIA_AUDIO_DEV_HAS_OPENSL      0
+#define PJMEDIA_AUDIO_DEV_HAS_ANDROID_JNI 1
 #define PJMEDIA_AUDIO_DEV_HAS_PORTAUDIO   0
 
 /* Security / SRTP left out intentionally for minimal footprint */
@@ -57,7 +57,7 @@
 #define PJMEDIA_HAS_ILBC_CODEC            0
 #define PJMEDIA_HAS_G729_CODEC            0
 
-/* Avoid duplicate JNI_OnLoad (PJSIP provides its own when enabled) */
-#define PJ_ANDROID_JNI                     0
+/* Enable JNI for Android audio */
+#define PJ_ANDROID_JNI                     1
 
 #endif /* PJ_CONFIG_SITE_H */
