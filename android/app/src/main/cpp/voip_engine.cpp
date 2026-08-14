@@ -30,6 +30,9 @@ static char g_global_cred_realm_wildcard[8] = "*";
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
 static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
+static char g_global_acc_id[128] = "";                // Account ID URI: sip:user@domain;transport=udp
+static char g_global_acc_reg_uri[128] = "";           // Registration URI: sip:domain;transport=udp
+static char g_global_call_dest_uri[256] = "";         // Current call destination URI (persists for auth retry)
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
 
@@ -475,14 +478,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     pjsua_acc_config acc_cfg;
     pjsua_acc_config_default(&acc_cfg);
 
-    std::string id = "sip:" + std::string(user) + "@" + std::string(domain);
-    std::string reg_uri = "sip:" + std::string(domain);
-
-    acc_cfg.id = pj_str_t{const_cast<char *>(id.c_str()), static_cast<pj_ssize_t>(strlen(id.c_str()))};
-    acc_cfg.reg_uri = pj_str_t{const_cast<char *>(reg_uri.c_str()), static_cast<pj_ssize_t>(strlen(reg_uri.c_str()))};
+    // Use static buffers for account URIs (not temporary std::string!)
+    // This prevents pj_str_t from pointing to freed memory
+    memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
+    memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
-    // Ajouter 2 credentials: une pour realm spécifique et une wildcard
-    // Ça garantit que PJSIP peut matcher le realm du serveur (ex: "asterisk")
+    snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
+             "sip:%s@%s;transport=udp", user, domain);
+    snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
+             "sip:%s;transport=udp", domain);
+    
+    acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
+    acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
+    
+    LOGI(">>> nativeRegister: Account URIs with forced UDP transport:");
+    LOGI("    - id=%s", g_global_acc_id);
+    LOGI("    - reg_uri=%s", g_global_acc_reg_uri);
     acc_cfg.cred_count = 2;
     
     // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
@@ -527,11 +538,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Ensures Digest auth retry works for all modules using account credentials
     acc_cfg.use_shared_auth = PJ_TRUE;
     LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
-    
-    // Force transport UDP for all requests (avoid unsupported transports in Contact headers)
-    acc_cfg.allow_contact_rewrite = 0;  // Don't rewrite using server's Contact header
-    acc_cfg.allow_via_rewrite = 0;      // Don't rewrite VIA
-    LOGI(">>> nativeRegister: Transport config: allow_contact_rewrite=0, allow_via_rewrite=0 (force UDP routing)");
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -610,15 +616,20 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     }
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
-    std::string dest = "sip:" + std::string(number);
-    pjsua_call_id call_id = PJSUA_INVALID_ID;
     
-    LOGI("nativeMakeCall: Making call to %s", dest.c_str());
+    // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
+    memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
+    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+    
+    LOGI("nativeMakeCall: Making call to %s (stored in static buffer for auth retry)", g_global_call_dest_uri);
     
     std::lock_guard<std::mutex> lock(g_mutex);
-    pj_str_t dst = {const_cast<char *>(dest.c_str()), static_cast<pj_ssize_t>(strlen(dest.c_str()))};
+    pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
     
+    pjsua_call_id call_id = PJSUA_INVALID_ID;
     pj_status_t status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
+    
+    env->ReleaseStringUTFChars(jnumber, number);
     
     LOGI("nativeMakeCall: pjsua_call_make_call returned status=%d, call_id=%d", status, call_id);
     
@@ -640,7 +651,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         emit_event("call_error", errbuf);
         return JNI_FALSE;
     }
-    LOGI("nativeMakeCall: Successfully initiated call %s (id=%d)", dest.c_str(), call_id);
+    LOGI("nativeMakeCall: Successfully initiated call %s (id=%d, URI stored for auth retry)", g_global_call_dest_uri, call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
     return JNI_TRUE;
 }
