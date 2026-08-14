@@ -48,31 +48,39 @@ static void emit_event(const char *type, const char *message);
 
 // Custom PJSIP logger callback pour tracer TOUTES les trames SIP
 static void pjsip_log_callback(int level, const char *data, int len) {
-    // Log uniquement les messages SIP (contiennent "SUBSCRIBE", "401", "200", etc.)
-    if (data && len > 0) {
-        // Détecteur de trames SIP importantes
-        if (strstr(data, "SUBSCRIBE") || 
-            strstr(data, "200 ") || 
-            strstr(data, "401 ") ||
-            strstr(data, "WWW-Authenticate") ||
-            strstr(data, "Proxy-Authenticate") ||
-            strstr(data, "Authorization") ||
-            strstr(data, "NOTIFY") ||
-            strstr(data, "SIP/2.0")) {
-            
-            // Formater le log
-            char log_buf[512];
-            int copy_len = (len < 500) ? len : 500;
-            strncpy(log_buf, data, copy_len);
-            log_buf[copy_len] = '\0';
-            
-            // Retirer le newline final si présent
-            if (log_buf[copy_len-1] == '\n') {
-                log_buf[copy_len-1] = '\0';
+    // Log TOUTES les lignes PJSIP (level 3=INFO and above)
+    if (data && len > 0 && level >= 3) {  // 3=INFO, 4=WARNING, 5=ERROR, 6=CRITICAL
+        // Formater le log
+        char log_buf[256];
+        int copy_len = (len < 250) ? len : 250;
+        strncpy(log_buf, data, copy_len);
+        log_buf[copy_len] = '\0';
+        
+        // Retirer le newline final si présent
+        if (copy_len > 0 && log_buf[copy_len-1] == '\n') {
+            log_buf[copy_len-1] = '\0';
+        }
+        
+        // Préfixer avec "SIP TRAME:" pour faciliter les grep
+        // Colorer selon le contenu
+        if (strstr(log_buf, "SUBSCRIBE")) {
+            LOGI("=== SIP TRAME [SUBSCRIBE] %s", log_buf);
+        } else if (strstr(log_buf, "401") || strstr(log_buf, "Unauthorized")) {
+            LOGW("=== SIP TRAME [401 AUTH] %s", log_buf);
+        } else if (strstr(log_buf, "200")) {
+            LOGI("=== SIP TRAME [200 OK] %s", log_buf);
+        } else if (strstr(log_buf, "NOTIFY")) {
+            LOGI("=== SIP TRAME [NOTIFY] %s", log_buf);
+        } else if (strstr(log_buf, "pjsua_buddy")) {
+            LOGI("=== SIP TRAME [BUDDY] %s", log_buf);
+        } else if (strstr(log_buf, "evsub")) {
+            LOGI("=== SIP TRAME [EVSUB] %s", log_buf);
+        } else {
+            // Log les autres lignes importantes (registration, etc.)
+            // Mais pas les lignes trop verbales
+            if (level <= 4) {  // Uniquement WARNING et au-dessus
+                LOGI("=== SIP TRAME [L%d] %s", level, log_buf);
             }
-            
-            // Préfixer avec "SIP TRAME:" pour faciliter les grep
-            LOGI("=== SIP TRAME [level=%d]: %s", level, log_buf);
         }
     }
 }
@@ -225,17 +233,25 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     }
     
     // SIP TRACE: Afficher le code de statut SIP (401, 200, etc.)
-    LOGI("=== SIP TRACE: on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), status=%d (SIP CODE), status_text=%s", 
-         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status, buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
+    LOGI("=== SIP TRACE: on_buddy_state CALLED #%d: buddy_id=%d, sub_state=%d(%s), sip_status=%d", 
+         buddy_id, buddy_id, buddy_info.sub_state, sub_state_str, buddy_info.status);
     
-    // DEBUG: Afficher les infos détaillées du buddy incluant le code SIP
-    LOGI("=== SIP TRACE: on_buddy_state DEBUG: uri=%s, monitor_pres=%d, sip_code=%d",
+    LOGI("=== SIP TRACE: on_buddy_state DEBUG: uri=%s, monitor_pres=%d, status_text=%s",
          buddy_info.uri.ptr ? buddy_info.uri.ptr : "N/A",
          buddy_info.monitor_pres,
-         buddy_info.status);  // buddy_info.status contient le code SIP (401, 200, etc.)
+         buddy_info.status_text.ptr ? buddy_info.status_text.ptr : "N/A");
     
-    // CRITICAL: Si status=401, cela signifie que le serveur a refusé l'authentification
-    if (buddy_info.status == 401) {
+    // CRITICAL: Si status=0, cela signifie "pas de réponse SIP reçue du tout"
+    // Si status=401, le serveur a refusé l'authentification
+    // Si status=200, le SUBSCRIBE a réussi
+    if (buddy_info.status == 0) {
+        LOGW("=== SIP TRACE: status=0 (NO SIP RESPONSE RECEIVED!) - Check network/firewall");
+        LOGW("=== SIP TRACE: Account credentials check:");
+        LOGW("    - g_acc_id=%d", g_acc_id);
+        LOGW("    - g_account_username=%s", g_account_username.c_str());
+        LOGW("    - g_account_domain=%s", g_account_domain.c_str());
+        LOGW("    - Buddy trying to use account %d for auth", g_acc_id);
+    } else if (buddy_info.status == 401) {
         LOGW("=== SIP TRACE: RECEIVED 401 UNAUTHORIZED! Server rejected SUBSCRIBE without Digest auth");
         LOGW("=== SIP TRACE: PJSIP should retry with acc_id=%d credentials", g_acc_id);
     } else if (buddy_info.status == 200) {
@@ -255,14 +271,17 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         if (buddy_info.status == 401) {
             LOGW(">>> on_buddy_state: Buddy in SENT state with 401 Unauthorized. Waiting for PJSIP retry with Digest auth...");
             LOGW(">>> on_buddy_state: IMPORTANT: Check that acc_id=%d is linked to account with credentials!", g_acc_id);
+        } else if (buddy_info.status == 0) {
+            LOGW(">>> on_buddy_state: Buddy in SENT state with status=0 (no response). Check network connection!");
+            LOGW(">>> on_buddy_state: Device may not be reachable from app network, or firewall blocking port 5060");
         } else {
-            LOGW(">>> on_buddy_state: Buddy in SENT state, attempting pjsua_buddy_subscribe_pres to force re-subscribe with credentials...");
+            LOGW(">>> on_buddy_state: Buddy in SENT state (status=%d), attempting pjsua_buddy_subscribe_pres...", buddy_info.status);
             pj_status_t resubscribe_status = pjsua_buddy_subscribe_pres(buddy_id, PJ_TRUE);
             LOGI(">>> on_buddy_state: pjsua_buddy_subscribe_pres returned status=%d", resubscribe_status);
         }
-        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → waiting for auth retry");
+        LOGI(">>> on_buddy_state: Subscription NOT active (SENT) → waiting for response from server");
     } else {
-        LOGI(">>> on_buddy_state: Subscription NOT active (%s) → need to wait for 200 OK or ACTIVE state", sub_state_str);
+        LOGI(">>> on_buddy_state: Subscription state=%s (not SENT, not ACTIVE) → monitoring...", sub_state_str);
     }
     
     // Lookup du contact depuis la reverse map
@@ -717,9 +736,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.acc_id = g_acc_id;                // IMPORTANT: Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
-    LOGI(">>> nativeSubscribePresence: buddy configured with acc_id=%d for Digest auth on SUBSCRIBE", g_acc_id);
+    LOGI(">>> nativeSubscribePresence: buddy_cfg parameters:");
+    LOGI("    - uri: %s", buddy_uri_buf);
+    LOGI("    - subscribe: %d (should be 1)", buddy_cfg.subscribe);
+    LOGI("    - acc_id: %d (should match account with credentials)", buddy_cfg.acc_id);
+    LOGI("    - Account credentials saved: username=%s, domain=%s", g_account_username.c_str(), g_account_domain.c_str());
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
+    LOGI(">>> nativeSubscribePresence: Calling pjsua_buddy_add()...");
     pjsua_buddy_id buddy_id;
     pj_status_t status = pjsua_buddy_add(&buddy_cfg, &buddy_id);
     if (status != PJ_SUCCESS) {
@@ -729,10 +753,12 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
         return JNI_FALSE;
     }
     
+    LOGI(">>> nativeSubscribePresence: pjsua_buddy_add SUCCESS, buddy_id=%d", buddy_id);
+    
     // Tracker la subscription dans les deux maps (subscription + reverse pour on_buddy_state lookup)
     g_buddy_subscriptions[contact_str] = buddy_id;
     g_buddy_reverse_map[buddy_id] = contact_str;  // Enable C++ lookup without JNI
-    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, tracked in reverse_map, sending SUBSCRIBE to server for: %s", buddy_id, contact_str);
+    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, tracked in reverse_map, SUBSCRIBE sent to server for: %s", buddy_id, contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     env->ReleaseStringUTFChars(jprefix, prefix_str);
