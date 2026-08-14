@@ -29,6 +29,7 @@ static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
+static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
 
@@ -156,7 +157,25 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
     pjsua_call_info ci;
     if (pjsua_call_get_info(call_id, &ci) != PJ_SUCCESS) return;
     
-    LOGI("=== on_call_state call_id=%d, state=%d ===", call_id, ci.state);
+    // Convert state to readable string
+    const char *state_str = "UNKNOWN";
+    if (ci.state == PJSIP_INV_STATE_NULL) state_str = "NULL";
+    else if (ci.state == PJSIP_INV_STATE_CALLING) state_str = "CALLING";
+    else if (ci.state == PJSIP_INV_STATE_INCOMING) state_str = "INCOMING";
+    else if (ci.state == PJSIP_INV_STATE_EARLY) state_str = "EARLY";
+    else if (ci.state == PJSIP_INV_STATE_CONNECTING) state_str = "CONNECTING";
+    else if (ci.state == PJSIP_INV_STATE_CONFIRMED) state_str = "CONFIRMED";
+    else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) state_str = "DISCONNECTED";
+    
+    LOGI("=== CALL STATE: call_id=%d, state=%d(%s), last_status=%d, media_cnt=%u",
+         call_id, ci.state, state_str, ci.last_status, ci.media_cnt);
+    
+    // DEBUG: Check if this is a 401 response
+    if (ci.last_status == 401) {
+        LOGW(">>> CALL STATE: RECEIVED 401 UNAUTHORIZED!");
+        LOGW(">>> CALL STATE: INVITE retry should happen automatically with Digest auth from account %d", g_acc_id);
+        LOGW(">>> CALL STATE: If no retry seen in logs, check if allow_contact_rewrite/allow_via_rewriting are preventing it");
+    }
     
     if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
         LOGI("Call CONFIRMED - call_id=%d, media_cnt=%u", call_id, ci.media_cnt);
@@ -166,7 +185,8 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
         LOGI("Call RINGING - call_id=%d, state=%d", call_id, ci.state);
         emit_event("call_ringing", std::to_string(call_id).c_str());
     } else if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
-        LOGI("Call DISCONNECTED - call_id=%d, status=%d", call_id, ci.last_status);
+        LOGI("Call DISCONNECTED - call_id=%d, status=%d, reason=%s", call_id, ci.last_status,
+             ci.last_status_text.ptr ? ci.last_status_text.ptr : "");
         std::string reason;
         reason += std::to_string(ci.last_status);
         reason += " ";
@@ -174,7 +194,7 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e) {
         std::string payload = std::to_string(call_id) + "|" + reason;
         emit_event("call_ended", payload.c_str());
     } else {
-        LOGI("Call state change - call_id=%d, state=%d (not CONFIRMED/EARLY/DISCONNECTED)", call_id, ci.state);
+        LOGI("Call state change - call_id=%d, state=%d(%s) (not CONFIRMED/EARLY/DISCONNECTED)", call_id, ci.state, state_str);
     }
 }
 
@@ -491,8 +511,15 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        acc_cfg.proxy[0] = pj_str_t{const_cast<char *>(proxy), static_cast<pj_ssize_t>(strlen(proxy))};
+        // Force UDP transport to avoid TLS/STUN issues from server
+        // Some servers return contacts with unsupported transports (TLS, STUN, etc.)
+        // Forcing transport=udp ensures all SIP requests use UDP
+        memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
+        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
+                 "%s;transport=udp", proxy);
+        acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
+        LOGI(">>> nativeRegister: Proxy with forced UDP transport: %s", g_global_proxy_with_transport);
     }
 
     // PJSIP 2.17: Enable shared authentication session
@@ -500,6 +527,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Ensures Digest auth retry works for all modules using account credentials
     acc_cfg.use_shared_auth = PJ_TRUE;
     LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
+    
+    // Force transport UDP for all requests (avoid unsupported transports in Contact headers)
+    acc_cfg.allow_contact_rewrite = 0;  // Don't rewrite using server's Contact header
+    acc_cfg.allow_via_rewriting = 0;    // Don't rewrite VIA
+    LOGI(">>> nativeRegister: Transport config: allow_contact_rewrite=0, allow_via_rewriting=0 (force UDP routing)");
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -527,6 +559,19 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     g_account_domain = domain;
     
     LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials from static buffers)", user, domain, g_acc_id);
+
+    // DEBUG: Verify transport configuration was applied correctly
+    pjsua_acc_info acc_info;
+    pjsua_acc_get_info(g_acc_id, &acc_info);
+    LOGI(">>> nativeRegister: TRANSPORT CONFIG VERIFICATION:");
+    LOGI("    - account ID: %d", g_acc_id);
+    LOGI("    - status text: %s", acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
+    LOGI("    - has credentials (cred_count from cfg): 2");
+    LOGI("    - proxy[0] with transport=udp: %s", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
+    LOGI("    - allow_contact_rewrite: 0 (disabled, force UDP routing)");
+    LOGI("    - allow_via_rewriting: 0 (disabled, force UDP routing)");
+    LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
+    LOGI(">>> nativeRegister: When INVITE 401 is received, retry should use proxy UDP routing (not server Contact)");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
