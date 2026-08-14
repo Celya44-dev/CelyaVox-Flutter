@@ -665,15 +665,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
     if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
-        LOGI(">>> nativeMakeCall: Account Config from pjsua_acc_get_info:");
+        LOGI(">>> nativeMakeCall: Account Config:");
         LOGI("    Account ID: %d", g_acc_id);
         LOGI("    Username: %s", g_global_cred_username);
-        LOGI("    Proxy COUNT: %u (should be 1 if configured, 0 if not)", acc_info.proxy_cnt);
-        if (acc_info.proxy_cnt > 0) {
-            LOGI("    Proxy[0]: %.*s", (int)acc_info.proxy[0].slen, acc_info.proxy[0].ptr);
-        } else {
-            LOGW("    *** NO PROXY CONFIGURED - will use DIRECT ROUTING to domain ***");
-        }
+        LOGI("    Proxy (from static buffer): %s (empty=%s)", g_global_proxy_with_transport, 
+             (strlen(g_global_proxy_with_transport) == 0) ? "YES" : "NO");
         LOGI("    Account URI: %s", g_global_acc_id);
         LOGI("    Reg URI: %s", g_global_acc_reg_uri);
     }
