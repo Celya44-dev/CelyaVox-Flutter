@@ -745,33 +745,53 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     pjsua_buddy_config buddy_cfg;
     pjsua_buddy_config_default(&buddy_cfg);
     buddy_cfg.uri = pj_str(buddy_uri_buf);
-    buddy_cfg.subscribe = PJ_TRUE;              // Activer la subscription de présence
-    buddy_cfg.acc_id = g_acc_id;                // IMPORTANT: Lier le buddy au compte pour réutiliser ses credentials
+    
+    // IMPORTANT: Pour BLF (Busy Lamp Field), utiliser subscribe_dlg_event
+    // Non pas subscribe (qui est pour la presence classique)
+    buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
+    buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
+    
+    buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
     LOGI(">>> nativeSubscribePresence: buddy_cfg parameters:");
-    LOGI("    - uri: %s", buddy_uri_buf);
-    LOGI("    - subscribe: %d (should be 1)", buddy_cfg.subscribe);
-    LOGI("    - acc_id: %d (should match account with credentials)", buddy_cfg.acc_id);
-    LOGI("    - Account credentials saved: username=%s, domain=%s", g_account_username.c_str(), g_account_domain.c_str());
+    char config_summary[512];
+    pj_ansi_snprintf(config_summary, sizeof(config_summary), 
+        "buddy_cfg SUMMARY: uri=%s, subscribe=%d, subscribe_dlg_event=%d, acc_id=%d, username=%s",
+        buddy_uri_buf, buddy_cfg.subscribe, buddy_cfg.subscribe_dlg_event, buddy_cfg.acc_id, g_account_username.c_str());
+    LOGI(">>> nativeSubscribePresence: %s", config_summary);
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     LOGI(">>> nativeSubscribePresence: Calling pjsua_buddy_add()...");
     pjsua_buddy_id buddy_id;
     pj_status_t status = pjsua_buddy_add(&buddy_cfg, &buddy_id);
+    
+    LOGI(">>> nativeSubscribePresence: pjsua_buddy_add() returned status=%d, buddy_id=%d", status, buddy_id);
+    
     if (status != PJ_SUCCESS) {
-        LOGE(">>> nativeSubscribePresence: pjsua_buddy_add FAILED for %s (status=%d)", contact_str, status);
+        LOGE(">>> nativeSubscribePresence: pjsua_buddy_add FAILED! status=%d (PJ_SUCCESS=0)", status);
+        char errbuf[128];
+        pj_strerror(status, errbuf, sizeof(errbuf));
+        LOGE(">>> nativeSubscribePresence: Error message: %s", errbuf);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         env->ReleaseStringUTFChars(jprefix, prefix_str);
         return JNI_FALSE;
     }
     
-    LOGI(">>> nativeSubscribePresence: pjsua_buddy_add SUCCESS, buddy_id=%d", buddy_id);
+    // Vérifier que buddy_id est valide
+    if (buddy_id < 0) {
+        LOGE(">>> nativeSubscribePresence: buddy_id is INVALID (%d)! PJSUA returned PJ_SUCCESS but invalid buddy_id", buddy_id);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_FALSE;
+    }
+    
+    LOGI(">>> nativeSubscribePresence: pjsua_buddy_add SUCCESS! buddy_id=%d is VALID", buddy_id);
     
     // Tracker la subscription dans les deux maps (subscription + reverse pour on_buddy_state lookup)
     g_buddy_subscriptions[contact_str] = buddy_id;
     g_buddy_reverse_map[buddy_id] = contact_str;  // Enable C++ lookup without JNI
-    LOGI(">>> nativeSubscribePresence: SUCCESS! buddy_id=%d, tracked in reverse_map, SUBSCRIBE sent to server for: %s", buddy_id, contact_str);
+    LOGI(">>> nativeSubscribePresence: Tracked in maps. SUBSCRIBE should now be sent to server for: %s", contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     env->ReleaseStringUTFChars(jprefix, prefix_str);
