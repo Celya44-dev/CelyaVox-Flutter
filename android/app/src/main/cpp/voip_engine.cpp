@@ -280,21 +280,19 @@ static std::map<pjsua_buddy_id, int> g_buddy_callback_counter;  // Track how man
 // Helper function to map PJSUA buddy status to presence string (includes ringing, busy, etc.)
 static const char* map_buddy_status_to_presence(pjsua_buddy_status status, const pj_str_t *status_text) {
     // PJSUA_BUDDY_STATUS enum values:
-    // PJSUA_BUDDY_STATUS_UNKNOWN   = 0
     // PJSUA_BUDDY_STATUS_ONLINE    = 1
     // PJSUA_BUDDY_STATUS_OFFLINE   = 2
-    // PJSUA_BUDDY_STATUS_BUSY      = 3
     
     // First, check status_text for detailed presence info
     if (status_text && status_text->slen > 0) {
         char status_text_lower[256];
-        int len = (status_text->slen < 255) ? status_text->slen : 255;
+        int len = (status_text->slen < 255) ? (int)status_text->slen : 255;
         strncpy(status_text_lower, status_text->ptr, len);
         status_text_lower[len] = '\0';
         
         // Convert to lowercase for comparison
         for (int i = 0; i < len; i++) {
-            status_text_lower[i] = tolower(status_text_lower[i]);
+            status_text_lower[i] = tolower((unsigned char)status_text_lower[i]);
         }
         
         // Look for keywords in status_text
@@ -316,7 +314,6 @@ static const char* map_buddy_status_to_presence(pjsua_buddy_status status, const
     switch (status) {
         case PJSUA_BUDDY_STATUS_ONLINE:   return "available";
         case PJSUA_BUDDY_STATUS_OFFLINE:  return "offline";
-        case PJSUA_BUDDY_STATUS_BUSY:     return "busy";     // Generic busy
         default:                           return "offline";   // Unknown = offline
     }
 }
@@ -340,6 +337,7 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         case PJSIP_EVSUB_STATE_PENDING:   sub_state_str = "PENDING"; break;
         case PJSIP_EVSUB_STATE_ACTIVE:    sub_state_str = "ACTIVE"; break;
         case PJSIP_EVSUB_STATE_TERMINATED:sub_state_str = "TERMINATED"; break;
+        default:                           sub_state_str = "UNKNOWN"; break;
     }
     
     // SIP TRACE: Afficher le code de statut SIP (401, 200, etc.)
@@ -372,7 +370,7 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
         
         // Log additional debug info if available (status_text may contain extra info)
         if (buddy_info.status_text.slen > 0) {
-            LOGI(">>> on_buddy_state: status_text=%.*s", buddy_info.status_text.slen, buddy_info.status_text.ptr);
+            LOGI(">>> on_buddy_state: status_text: %.*s", (int)buddy_info.status_text.slen, buddy_info.status_text.ptr);
         }
     } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
         LOGI(">>> on_buddy_state: Subscription SENT - PJSIP will retry with acc_id=%d credentials if needed", g_acc_id);
@@ -837,7 +835,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeHangupCall(JNIEnv *env, jobject, jstrin
         // Use 487 Request Terminated to force CANCEL for early states
         hangup_code = 487;
     } else if (ci.state == PJSIP_INV_STATE_CONFIRMED) {
-        LOGI(">>> nativeHangupCall: Call confirmed - will send BYE", state_str);
+        LOGI(">>> nativeHangupCall: Call confirmed - will send BYE");
         hangup_code = 0;
     } else {
         LOGI(">>> nativeHangupCall: Call in %s state - will use default hangup behavior", state_str);
