@@ -48,6 +48,7 @@ class _InCallPageState extends State<InCallPage> {
   @override
   void dispose() {
     _eventsSub?.cancel();
+    _stopRinging();
     super.dispose();
   }
 
@@ -135,7 +136,13 @@ class _InCallPageState extends State<InCallPage> {
 
   void _listenCallUpdates() {
     _eventsSub = VoipEvents.stream.listen((event) {
-      if (event is CallConnectedEvent) {
+      if (event is CallRingingEvent) {
+        // Outgoing call is ringing (remote party is receiving the call)
+        AppLogger.instance.log('>>> InCallPage.CallRingingEvent: starting ringback tone for callId=${event.callId}');
+        if (mounted) {
+          _startRinging(isOutgoing: true);
+        }
+      } else if (event is CallConnectedEvent) {
         AppLogger.instance.log('>>> InCallPage.CallConnectedEvent: callId=${event.callId}, callerId=${event.callerId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
@@ -244,6 +251,22 @@ class _InCallPageState extends State<InCallPage> {
       if (mounted) {
         setState(() => _isHangingUp = false);
       }
+    }
+  }
+
+  Future<void> _startRinging({bool isOutgoing = false}) async {
+    try {
+      await widget.engine.startInAppRinging(isOutgoing: isOutgoing);
+    } catch (e) {
+      AppLogger.instance.log('Erreur démarrage ringtone: $e');
+    }
+  }
+
+  Future<void> _stopRinging() async {
+    try {
+      await widget.engine.stopInAppRinging();
+    } catch (e) {
+      AppLogger.instance.log('Erreur arrêt ringtone: $e');
     }
   }
 
