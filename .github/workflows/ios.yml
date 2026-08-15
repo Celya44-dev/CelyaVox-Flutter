@@ -62,6 +62,11 @@ jobs:
             pods-${{ runner.os }}-${{ steps.flutter-version.outputs.version }}-
             pods-${{ runner.os }}-
 
+      - name: Clean generated iOS files
+        run: |
+          rm -f ios/Flutter/Generated.xcconfig
+          rm -f ios/Flutter/Flutter.podspec
+
       - name: Flutter pub get
         run: flutter pub get
 

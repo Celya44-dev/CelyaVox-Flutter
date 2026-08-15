@@ -9,3 +9,7 @@ firebase-service-account.json
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 
+# Flutter generated iOS files
+ios/Flutter/Generated.xcconfig
+ios/Flutter/Flutter.podspec
+
