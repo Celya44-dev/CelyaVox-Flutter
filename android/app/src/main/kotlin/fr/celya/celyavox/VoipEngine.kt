@@ -411,11 +411,15 @@ class VoipEngine(
             return
         }
         
+        Log.i(TAG, ">>> startInAppRinging called with isOutgoing=$isOutgoing")
+        
         if (isOutgoing) {
             // Play ringback tone for outgoing calls
+            Log.i(TAG, ">>> Playing OUTGOING ringback tone (440 Hz)")
             startOutgoingRingbackTone()
         } else {
             // Play ringtone for incoming calls
+            Log.i(TAG, ">>> Playing INCOMING ringtone")
             startIncomingRingtone()
         }
     }
@@ -587,7 +591,17 @@ class VoipEngine(
     }
 
     fun stopInAppRinging() {
-        incomingRingtone?.stop()
+        // Stop incoming ringtone (disable looping first to ensure it stops immediately)
+        if (incomingRingtone != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    incomingRingtone?.isLooping = false
+                }
+                incomingRingtone?.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping incoming ringtone: ${e.message}")
+            }
+        }
         incomingRingtone = null
         outgoingRingbackTone?.stop()
         outgoingRingbackTone = null
@@ -601,7 +615,9 @@ class VoipEngine(
             }
             ringbackAudioTrack = null
         }
-        ringbackPlaybackThread?.join(100)
+        if (ringbackPlaybackThread != null) {
+            ringbackPlaybackThread?.join(500)  // Wait up to 500ms for thread to finish
+        }
         ringbackPlaybackThread = null
         incomingVibrator?.cancel()
         incomingVibrator = null

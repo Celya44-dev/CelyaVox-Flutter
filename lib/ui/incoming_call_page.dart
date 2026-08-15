@@ -77,9 +77,16 @@ class _IncomingCallPageState extends State<IncomingCallPage> {
   void _listenCallEvents() {
     _eventsSub = VoipEvents.stream.listen((event) {
       if (event is CallEndedEvent && event.callId == widget.callId) {
+        AppLogger.instance.log('>>> IncomingCallPage.CallEndedEvent: Stopping ringing and closing page for callId=${event.callId}');
         _stopRinging();
         if (mounted) {
-          Navigator.of(context).maybePop();
+          // Use pop() instead of maybePop() to reliably close the page
+          // even if it's the only page in the navigation stack
+          try {
+            Navigator.of(context).pop();
+          } catch (e) {
+            AppLogger.instance.log('>>> IncomingCallPage: Error popping page: $e');
+          }
         }
       }
     });

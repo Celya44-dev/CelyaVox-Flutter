@@ -143,6 +143,8 @@ class _InCallPageState extends State<InCallPage> {
           _startRinging(isOutgoing: true);
         }
       } else if (event is CallConnectedEvent) {
+        // Call is connected, stop the ringing/ringback tone
+        _stopRinging();
         AppLogger.instance.log('>>> InCallPage.CallConnectedEvent: callId=${event.callId}, callerId=${event.callerId}');
         if (mounted && event.callId.isNotEmpty) {
           setState(() {
