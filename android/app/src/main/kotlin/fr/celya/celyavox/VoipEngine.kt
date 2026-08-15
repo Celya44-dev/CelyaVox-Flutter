@@ -461,6 +461,7 @@ class VoipEngine(
     }
 
     private fun playRingbackToneSynthetic() {
+        var track: AudioTrack? = null
         try {
             val sampleRate = 44100 // Hz
             val frequency = 440.0 // Hz (standard European ringback tone)
@@ -494,13 +495,14 @@ class VoipEngine(
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
             
-            ringbackAudioTrack = AudioTrack(
+            track = AudioTrack(
                 audioAttributes,
                 audioFormat,
                 bufferSize,
                 AudioTrack.MODE_STREAM,
                 AudioManager.AUDIO_SESSION_ID_GENERATE
             ).apply { play() }
+            ringbackAudioTrack = track
             
             val toneBuffer = ShortArray(toneSamples)
             val silenceBuffer = ShortArray(silenceSamples)
@@ -512,16 +514,28 @@ class VoipEngine(
             }
             
             // Play pattern: 1.5 seconds tone + 3.5 seconds silence, repeat
-            while (ringbackShouldPlay && ringbackAudioTrack != null) {
-                ringbackAudioTrack?.write(toneBuffer, 0, toneSamples, AudioTrack.WRITE_BLOCKING)
-                ringbackAudioTrack?.write(silenceBuffer, 0, silenceSamples, AudioTrack.WRITE_BLOCKING)
+            while (ringbackShouldPlay && track != null) {
+                try {
+                    track.write(toneBuffer, 0, toneSamples, AudioTrack.WRITE_BLOCKING)
+                    track.write(silenceBuffer, 0, silenceSamples, AudioTrack.WRITE_BLOCKING)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error writing to ringback AudioTrack: ${e.message}")
+                    break
+                }
             }
             
         } catch (e: Exception) {
             Log.w(TAG, "Error in playRingbackToneSynthetic: ${e.message}", e)
         } finally {
-            ringbackAudioTrack?.stop()
-            ringbackAudioTrack?.release()
+            // Use local reference to avoid race condition with stopInAppRinging()
+            try {
+                if (track != null && track.state == AudioTrack.STATE_INITIALIZED) {
+                    track.stop()
+                    track.release()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping/releasing ringback track: ${e.message}")
+            }
             ringbackAudioTrack = null
         }
     }
@@ -606,15 +620,22 @@ class VoipEngine(
         outgoingRingbackTone?.stop()
         outgoingRingbackTone = null
         ringbackShouldPlay = false
-        if (ringbackAudioTrack != null) {
+        
+        // Stop ringback AudioTrack - check state first to avoid IllegalStateException
+        val track = ringbackAudioTrack
+        if (track != null) {
             try {
-                ringbackAudioTrack?.stop()
-                ringbackAudioTrack?.release()
+                // Only stop if the track is in a valid state
+                if (track.state == AudioTrack.STATE_INITIALIZED) {
+                    track.stop()
+                }
+                track.release()
             } catch (e: Exception) {
                 Log.w(TAG, "Error stopping ringback audio track: ${e.message}")
             }
             ringbackAudioTrack = null
         }
+        
         if (ringbackPlaybackThread != null) {
             ringbackPlaybackThread?.join(500)  // Wait up to 500ms for thread to finish
         }
