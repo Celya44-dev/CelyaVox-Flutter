@@ -74,22 +74,34 @@ class BLFStateManager {
   /// Convertir l'état de présence string en BLFState
   BLFState _parsePresenceState(String stateStr) {
     switch (stateStr.toLowerCase()) {
+      // Available states
       case 'available':
       case 'online':
       case 'presence':
         return BLFState.available;
+      // Busy/On call states (including ringing)
       case 'busy':
       case 'on_the_phone':
       case 'occupied':
+      case 'ringing':           // Incoming call ringing
+      case 'alerting':          // Outgoing call alerting/ringing
+      case 'calling':           // Making a call
+      case 'confirmed':         // Call in progress
         return BLFState.busy;
+      // Away states
       case 'away':
       case 'idle':
+      case 'paused':
         return BLFState.away;
+      // Do Not Disturb states
       case 'dnd':
       case 'do_not_disturb':
+      case 'no_disturb':
         return BLFState.dnd;
+      // Offline states
       case 'offline':
       case 'unavailable':
+      case 'inactive':
       default:
         return BLFState.offline;
     }

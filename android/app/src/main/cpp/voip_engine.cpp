@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string>
 #include <map>
+#include <ctype.h>
 
 #include <pjlib.h>
 #include <pjsip.h>
@@ -276,6 +277,50 @@ static void on_reg_state(pjsua_acc_id acc_id) {
 
 static std::map<pjsua_buddy_id, int> g_buddy_callback_counter;  // Track how many times on_buddy_state is called per buddy
 
+// Helper function to map PJSUA buddy status to presence string (includes ringing, busy, etc.)
+static const char* map_buddy_status_to_presence(pjsua_buddy_status status, const pj_str_t *status_text) {
+    // PJSUA_BUDDY_STATUS enum values:
+    // PJSUA_BUDDY_STATUS_UNKNOWN   = 0
+    // PJSUA_BUDDY_STATUS_ONLINE    = 1
+    // PJSUA_BUDDY_STATUS_OFFLINE   = 2
+    // PJSUA_BUDDY_STATUS_BUSY      = 3
+    
+    // First, check status_text for detailed presence info
+    if (status_text && status_text->slen > 0) {
+        char status_text_lower[256];
+        int len = (status_text->slen < 255) ? status_text->slen : 255;
+        strncpy(status_text_lower, status_text->ptr, len);
+        status_text_lower[len] = '\0';
+        
+        // Convert to lowercase for comparison
+        for (int i = 0; i < len; i++) {
+            status_text_lower[i] = tolower(status_text_lower[i]);
+        }
+        
+        // Look for keywords in status_text
+        if (strstr(status_text_lower, "ringing") || strstr(status_text_lower, "alerting") || strstr(status_text_lower, "calling")) {
+            return "ringing";  // Incoming ringing or outgoing alerting
+        }
+        if (strstr(status_text_lower, "on the phone") || strstr(status_text_lower, "on_the_phone") || strstr(status_text_lower, "on_call") || strstr(status_text_lower, "confirmed")) {
+            return "busy";     // Already on a call
+        }
+        if (strstr(status_text_lower, "away") || strstr(status_text_lower, "idle")) {
+            return "away";
+        }
+        if (strstr(status_text_lower, "dnd") || strstr(status_text_lower, "do not disturb") || strstr(status_text_lower, "do_not_disturb")) {
+            return "dnd";
+        }
+    }
+    
+    // Fall back to status enum
+    switch (status) {
+        case PJSUA_BUDDY_STATUS_ONLINE:   return "available";
+        case PJSUA_BUDDY_STATUS_OFFLINE:  return "offline";
+        case PJSUA_BUDDY_STATUS_BUSY:     return "busy";     // Generic busy
+        default:                           return "offline";   // Unknown = offline
+    }
+}
+
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // Callback appelé quand l'état du buddy change
     // Ceci peut être appelé plusieurs fois: initial SENT, après 401 retry, après 200 OK, après NOTIFY
@@ -321,8 +366,14 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // Parser le status de présence
     const char *presence_status = "offline";
     if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
-        presence_status = "available";
-        LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=available");
+        // Subscription is active - use the status field and status_text to determine presence
+        presence_status = map_buddy_status_to_presence(buddy_info.status, &buddy_info.status_text);
+        LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=%s (buddy_status=%d)", presence_status, buddy_info.status);
+        
+        // Log additional debug info if available (status_text may contain extra info)
+        if (buddy_info.status_text.slen > 0) {
+            LOGI(">>> on_buddy_state: status_text=%.*s", buddy_info.status_text.slen, buddy_info.status_text.ptr);
+        }
     } else if (buddy_info.sub_state == PJSIP_EVSUB_STATE_SENT) {
         LOGI(">>> on_buddy_state: Subscription SENT - PJSIP will retry with acc_id=%d credentials if needed", g_acc_id);
     } else {
@@ -678,13 +729,14 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
     LOGI(">>> nativeMakeCall: If 401 Unauthorized received, PJSIP should auto-retry with Digest auth");
     
+    // Release JNI string NOW, before taking mutex and calling native APIs
+    env->ReleaseStringUTFChars(jnumber, number);
+    
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
     
     pjsua_call_id call_id = PJSUA_INVALID_ID;
     pj_status_t status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
-    
-    env->ReleaseStringUTFChars(jnumber, number);
     
     LOGI(">>> nativeMakeCall: pjsua_call_make_call returned status=%d, call_id=%d", status, call_id);
     if (status != PJ_SUCCESS) {
@@ -704,7 +756,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
             LOGI("nativeMakeCall: Retry after set_null_snd_dev status=%d, call_id=%d", status, call_id);
         }
     }
-    env->ReleaseStringUTFChars(jnumber, number);
     
     if (status != PJ_SUCCESS) {
         char errbuf[128];
