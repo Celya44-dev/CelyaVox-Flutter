@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.util.Log
 import com.google.firebase.messaging.FirebaseMessaging
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
