@@ -72,11 +72,8 @@ class VoipEngine {
   Future<void> hangupCall(String callId) =>
       _invoke('hangupCall', <String, dynamic>{'callId': callId});
 
-  Future<void> subscribePresence(String contact, {String? prefix}) =>
-      _invoke('subscribePresence', <String, dynamic>{
-        'contact': contact,
-        'prefix': prefix ?? '',
-      });
+  Future<void> subscribePresence(String contact, {String prefix = ''}) =>
+      _invoke('subscribePresence', <String, dynamic>{'contact': contact, 'prefix': prefix});
 
   Future<void> unsubscribePresence(String contact) =>
       _invoke('unsubscribePresence', <String, dynamic>{'contact': contact});

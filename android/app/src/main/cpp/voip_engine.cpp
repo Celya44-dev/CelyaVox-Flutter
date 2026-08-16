@@ -930,21 +930,21 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     
     std::lock_guard<std::mutex> lock(g_mutex);
     
-    // Vérifier si déjà subscribé
-    auto it = g_buddy_subscriptions.find(contact_str);
-    if (it != g_buddy_subscriptions.end()) {
-        LOGI(">>> nativeSubscribePresence: already subscribed to %s", contact_str);
-        env->ReleaseStringUTFChars(jcontact, contact_str);
-        env->ReleaseStringUTFChars(jprefix, prefix_str);
-        return JNI_TRUE;
-    }
-    
     // Construire le contact final avec prefix si fourni
     std::string contact_with_prefix = std::string(contact_str);
     if (prefix_str && strlen(prefix_str) > 0 && contact_with_prefix.find(prefix_str) != 0) {
         contact_with_prefix = std::string(prefix_str) + contact_str;
     }
     LOGI(">>> nativeSubscribePresence: final_contact_with_prefix=%s", contact_with_prefix.c_str());
+    
+    // Vérifier si déjà subscribé (utiliser contact_with_prefix comme clé, pas juste contact_str)
+    auto it = g_buddy_subscriptions.find(contact_with_prefix);
+    if (it != g_buddy_subscriptions.end()) {
+        LOGI(">>> nativeSubscribePresence: already subscribed to %s", contact_with_prefix.c_str());
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_TRUE;
+    }
     
     // Construire un URI SIP valide: sip:contact@domain
     if (g_account_domain.empty()) {
@@ -1006,10 +1006,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     
     LOGI(">>> nativeSubscribePresence: pjsua_buddy_add SUCCESS! buddy_id=%d is VALID", buddy_id);
     
-    // Tracker la subscription dans les deux maps (subscription + reverse pour on_buddy_state lookup)
-    g_buddy_subscriptions[contact_str] = buddy_id;
-    g_buddy_reverse_map[buddy_id] = contact_str;  // Enable C++ lookup without JNI
-    LOGI(">>> nativeSubscribePresence: Tracked in maps. SUBSCRIBE should now be sent to server for: %s", contact_str);
+    // Tracker la subscription dans les deux maps (utiliser contact_with_prefix comme clé, PAS contact_str!)
+    // Cela permet de distinguer les subscriptions au même contact avec des prefixes différents
+    g_buddy_subscriptions[contact_with_prefix] = buddy_id;
+    g_buddy_reverse_map[buddy_id] = contact_with_prefix;  // Stocker le contact complet avec prefix
+    LOGI(">>> nativeSubscribePresence: Tracked in maps. SUBSCRIBE should now be sent to server for: %s", contact_with_prefix.c_str());
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     env->ReleaseStringUTFChars(jprefix, prefix_str);
@@ -1025,29 +1026,45 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     LOGI(">>> nativeUnsubscribePresence CALLED: contact=%s", contact_str);
     std::lock_guard<std::mutex> lock(g_mutex);
     
-    // Trouver et supprimer la subscription
-    auto it = g_buddy_subscriptions.find(contact_str);
-    if (it == g_buddy_subscriptions.end()) {
+    // Find subscription: either exact match OR matching contact with any prefix
+    // Example: looking for "100" should find "100" or "250100" (prefix="250")
+    pjsua_buddy_id buddy_id_to_delete = -1;
+    std::string key_to_delete = "";
+    
+    for (auto& pair : g_buddy_subscriptions) {
+        const std::string& key = pair.first;
+        // Check exact match or if key ends with contact_str
+        if (key == contact_str || (key.size() > contact_str.size() && 
+            key.substr(key.size() - strlen(contact_str)) == contact_str)) {
+            buddy_id_to_delete = pair.second;
+            key_to_delete = key;
+            LOGI(">>> nativeUnsubscribePresence: Found subscription key=%s matching contact=%s", key.c_str(), contact_str);
+            break;
+        }
+    }
+    
+    if (buddy_id_to_delete < 0) {
         LOGW(">>> nativeUnsubscribePresence: NOT subscribed to %s", contact_str);
         env->ReleaseStringUTFChars(jcontact, contact_str);
         return JNI_FALSE;
     }
     
-    pjsua_buddy_id buddy_id = it->second;
-    
     // Supprimer le buddy (PJSIP envoie automatiquement UNSUBSCRIBE SIP)
-    if (buddy_id >= 0) {
-        pj_status_t status = pjsua_buddy_del(buddy_id);
+    if (buddy_id_to_delete >= 0) {
+        pj_status_t status = pjsua_buddy_del(buddy_id_to_delete);
         if (status != PJ_SUCCESS) {
-            LOGE(">>> nativeUnsubscribePresence: pjsua_buddy_del FAILED for %s (buddy_id=%d, status=%d)", contact_str, buddy_id, status);
+            LOGE(">>> nativeUnsubscribePresence: pjsua_buddy_del FAILED for %s (buddy_id=%d, status=%d)", contact_str, buddy_id_to_delete, status);
         } else {
-            LOGI(">>> nativeUnsubscribePresence: pjsua_buddy_del SUCCESS buddy_id=%d (sending UNSUBSCRIBE to server)", buddy_id);
+            LOGI(">>> nativeUnsubscribePresence: pjsua_buddy_del SUCCESS buddy_id=%d (sending UNSUBSCRIBE to server)", buddy_id_to_delete);
         }
     }
     
-    g_buddy_subscriptions.erase(it);
-    g_buddy_reverse_map.erase(buddy_id);  // Also clean up reverse map
-    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s, cleaned reverse_map", contact_str);
+    // Clean up both maps
+    if (!key_to_delete.empty()) {
+        g_buddy_subscriptions.erase(key_to_delete);
+    }
+    g_buddy_reverse_map.erase(buddy_id_to_delete);
+    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s, cleaned maps", contact_str);
     
     env->ReleaseStringUTFChars(jcontact, contact_str);
     return JNI_TRUE;

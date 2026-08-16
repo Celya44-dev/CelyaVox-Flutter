@@ -226,6 +226,14 @@ class _DialpadPageState extends State<DialpadPage> {
       if (event is RegistrationEvent) {
         final ok = event.statusText.contains('200');
         if (mounted) setState(() => _isRegistered = ok);
+        
+        // IMPORTANT: Lancer les subscriptions de présence SEULEMENT après l'enregistrement réussi
+        if (ok && _savedContacts.isNotEmpty) {
+          print('>>> SIP Registration SUCCESSFUL (200 OK) - launching BLF subscriptions');
+          unawaited(_subscribeAllPresenceInBackground(_savedContacts));
+        } else if (!ok) {
+          print('>>> SIP Registration FAILED - subscriptions will be retried');
+        }
       } else if (event is CallConnectedEvent) {
         if (!mounted || _isOpeningInCall) return;
         if (event.callId.isEmpty) return;
