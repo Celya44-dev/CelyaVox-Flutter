@@ -386,7 +386,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg *msg = rdata->msg_info.msg;
     
     // Only process NOTIFY requests
-    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY_METHOD) {
+    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY) {
         return PJ_FALSE;
     }
     
@@ -470,7 +470,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
             }
         } else {
             // Try adding sip: prefix
-            std::string contact_with_prefix = "sip:" + contact_uri;
+            std::string contact_with_prefix = std::string("sip:") + contact_uri;
             buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
         }
         
@@ -1227,7 +1227,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     
-    buddy_cfg.buddy_cb = &on_buddy_state;       // CRUCIAL: Enregistrer le callback pour être notifié des changements d'état
+    // buddy_cfg.buddy_cb = &on_buddy_state;       // Callback not available in this PJSIP version
     buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
