@@ -1022,8 +1022,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     ensure_pj_thread_registered("jni");
     if (!ensure_endpoint()) return JNI_FALSE;
     
-    const char *contact_str = env->GetStringUTFChars(jcontact, nullptr);
-    LOGI(">>> nativeUnsubscribePresence CALLED: contact=%s", contact_str);
+    const char *contact_cstr = env->GetStringUTFChars(jcontact, nullptr);
+    std::string contact_str(contact_cstr);  // Convert to std::string
+    LOGI(">>> nativeUnsubscribePresence CALLED: contact=%s", contact_str.c_str());
     std::lock_guard<std::mutex> lock(g_mutex);
     
     // Find subscription: either exact match OR matching contact with any prefix
@@ -1035,17 +1036,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
         const std::string& key = pair.first;
         // Check exact match or if key ends with contact_str
         if (key == contact_str || (key.size() > contact_str.size() && 
-            key.substr(key.size() - strlen(contact_str)) == contact_str)) {
+            key.substr(key.size() - contact_str.size()) == contact_str)) {
             buddy_id_to_delete = pair.second;
             key_to_delete = key;
-            LOGI(">>> nativeUnsubscribePresence: Found subscription key=%s matching contact=%s", key.c_str(), contact_str);
+            LOGI(">>> nativeUnsubscribePresence: Found subscription key=%s matching contact=%s", key.c_str(), contact_str.c_str());
             break;
         }
     }
     
     if (buddy_id_to_delete < 0) {
-        LOGW(">>> nativeUnsubscribePresence: NOT subscribed to %s", contact_str);
-        env->ReleaseStringUTFChars(jcontact, contact_str);
+        LOGW(">>> nativeUnsubscribePresence: NOT subscribed to %s", contact_str.c_str());
+        env->ReleaseStringUTFChars(jcontact, contact_cstr);
         return JNI_FALSE;
     }
     
@@ -1053,7 +1054,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
     if (buddy_id_to_delete >= 0) {
         pj_status_t status = pjsua_buddy_del(buddy_id_to_delete);
         if (status != PJ_SUCCESS) {
-            LOGE(">>> nativeUnsubscribePresence: pjsua_buddy_del FAILED for %s (buddy_id=%d, status=%d)", contact_str, buddy_id_to_delete, status);
+            LOGE(">>> nativeUnsubscribePresence: pjsua_buddy_del FAILED for %s (buddy_id=%d, status=%d)", contact_str.c_str(), buddy_id_to_delete, status);
         } else {
             LOGI(">>> nativeUnsubscribePresence: pjsua_buddy_del SUCCESS buddy_id=%d (sending UNSUBSCRIBE to server)", buddy_id_to_delete);
         }
@@ -1064,9 +1065,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnsubscribePresence(JNIEnv *env, jobjec
         g_buddy_subscriptions.erase(key_to_delete);
     }
     g_buddy_reverse_map.erase(buddy_id_to_delete);
-    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s, cleaned maps", contact_str);
+    LOGI(">>> nativeUnsubscribePresence: COMPLETE - unsubscribed from %s, cleaned maps", contact_str.c_str());
     
-    env->ReleaseStringUTFChars(jcontact, contact_str);
+    env->ReleaseStringUTFChars(jcontact, contact_cstr);
     return JNI_TRUE;
 }
 
