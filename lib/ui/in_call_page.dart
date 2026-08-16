@@ -238,6 +238,7 @@ class _InCallPageState extends State<InCallPage> {
   Future<void> _hangup() async {
     setState(() => _isHangingUp = true);
     final callId = _activeCallId.isNotEmpty ? _activeCallId : widget.callId;
+    AppLogger.instance.log('>>> InCallPage._hangup: _activeCallId=$_activeCallId, widget.callId=${widget.callId}, final callId=$callId');
     try {
       await widget.engine.hangupCall(callId);
       if (!mounted) return;

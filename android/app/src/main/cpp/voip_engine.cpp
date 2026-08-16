@@ -36,6 +36,8 @@ static char g_global_acc_reg_uri[128] = "";           // Registration URI: sip:d
 static char g_global_call_dest_uri[256] = "";         // Current call destination URI (persists for auth retry)
 static std::map<std::string, pjsua_buddy_id> g_buddy_subscriptions;  // Tracker des subscriptions de présence
 static std::map<pjsua_buddy_id, std::string> g_buddy_reverse_map;  // Reverse map: buddy_id → contact (pour lookup rapide)
+static std::map<pjsua_buddy_id, std::string> g_buddy_last_dialog_state;  // Track last dialog state for each buddy
+static jobject g_engine_instance = nullptr;  // Global reference to the Engine instance for event emission
 
 static void ensure_pj_thread_registered(const char *name) {
     if (pj_thread_is_registered()) return;
@@ -318,15 +320,232 @@ static const char* map_buddy_status_to_presence(pjsua_buddy_status status, const
     }
 }
 
+// Helper function to parse dialog-info+xml and extract state
+static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len) {
+    if (!xml_body || xml_len <= 0) {
+        LOGW(">>> parse_dialog_state_from_xml: No XML body provided");
+        return nullptr;
+    }
+    
+    // Log the received XML for debugging
+    char xml_snippet[512];
+    int snippet_len = (xml_len < 500) ? xml_len : 500;
+    strncpy(xml_snippet, xml_body, snippet_len);
+    xml_snippet[snippet_len] = '\0';
+    LOGI(">>> parse_dialog_state_from_xml: Received XML (first %d bytes): %s", xml_len, xml_snippet);
+    
+    // Look for <state>...</state> tag
+    const char* state_start = strstr(xml_body, "<state>");
+    if (!state_start) {
+        LOGW(">>> parse_dialog_state_from_xml: No <state> tag found in XML");
+        return nullptr;
+    }
+    
+    state_start += 7;  // Skip "<state>"
+    const char* state_end = strstr(state_start, "</state>");
+    if (!state_end) {
+        LOGW(">>> parse_dialog_state_from_xml: No closing </state> tag found");
+        return nullptr;
+    }
+    
+    // Extract state value
+    int state_len = state_end - state_start;
+    static char state_value[128];
+    if (state_len >= 128) {
+        LOGW(">>> parse_dialog_state_from_xml: State value too long: %d", state_len);
+        return nullptr;
+    }
+    strncpy(state_value, state_start, state_len);
+    state_value[state_len] = '\0';
+    
+    LOGI(">>> parse_dialog_state_from_xml: Extracted dialog state: '%s'", state_value);
+    
+    // Map dialog state to presence state
+    if (strcmp(state_value, "terminated") == 0) {
+        LOGI(">>> parse_dialog_state_from_xml: Dialog terminated → presence='available' (no call)");
+        return "available";
+    } else if (strcmp(state_value, "early") == 0) {
+        LOGI(">>> parse_dialog_state_from_xml: Dialog early → presence='ringing' (call alerting)");
+        return "ringing";
+    } else if (strcmp(state_value, "confirmed") == 0) {
+        LOGI(">>> parse_dialog_state_from_xml: Dialog confirmed → presence='busy' (call active)");
+        return "busy";
+    } else {
+        LOGW(">>> parse_dialog_state_from_xml: Unknown dialog state '%s', defaulting to 'available'", state_value);
+        return "available";
+    }
+}
+
+// PJSIP Module to intercept NOTIFY messages for dialog-info parsing
+// This callback is invoked for NOTIFY requests
+static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
+    if (!rdata || !rdata->msg_info.msg) {
+        return PJ_FALSE;
+    }
+    
+    pjsip_msg *msg = rdata->msg_info.msg;
+    
+    // Only process NOTIFY requests
+    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY_METHOD) {
+        return PJ_FALSE;
+    }
+    
+    LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
+    
+    // Get the message body
+    pjsip_msg_body *body = msg->body;
+    if (!body || !body->data) {
+        LOGW(">>> NOTIFY_HANDLER: NOTIFY has no message body");
+        return PJ_FALSE;
+    }
+    
+    // Check if this is dialog-info+xml content type
+    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
+        LOGW(">>> NOTIFY_HANDLER: No content type specified");
+        return PJ_FALSE;
+    }
+    
+    pj_str_t type = body->content_type.type;
+    pj_str_t subtype = body->content_type.subtype;
+    
+    // Look for "application/dialog-info+xml"
+    if (!(pj_stricmp2(&type, "application") == 0 && 
+          (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
+        LOGI(">>> NOTIFY_HANDLER: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
+             (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
+        return PJ_FALSE;
+    }
+    
+    LOGI(">>> NOTIFY_HANDLER: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
+    
+    // Parse the XML body
+    const char *xml_body = (const char *)body->data;
+    int xml_len = body->len;
+    
+    const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
+    if (!presence_state) {
+        LOGW(">>> NOTIFY_HANDLER: Failed to parse presence state from XML");
+        return PJ_FALSE;
+    }
+    
+    // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
+    const char *uri_start = strstr(xml_body, "uri=\"");
+    if (!uri_start) {
+        LOGW(">>> NOTIFY_HANDLER: No uri= attribute found in XML dialog");
+        return PJ_FALSE;
+    }
+    
+    uri_start += 5;  // Skip "uri=\""
+    const char *uri_end = strchr(uri_start, '"');
+    if (!uri_end) {
+        LOGW(">>> NOTIFY_HANDLER: No closing quote for uri= attribute");
+        return PJ_FALSE;
+    }
+    
+    // Extract contact URI (sip:username@domain)
+    int uri_len = uri_end - uri_start;
+    static char contact_uri[256];
+    if (uri_len >= 256) {
+        LOGW(">>> NOTIFY_HANDLER: Contact URI too long: %d", uri_len);
+        return PJ_FALSE;
+    }
+    strncpy(contact_uri, uri_start, uri_len);
+    contact_uri[uri_len] = '\0';
+    
+    LOGI(">>> NOTIFY_HANDLER: Extracted contact from XML: %s", contact_uri);
+    
+    // Look up the buddy_id from our subscription map
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto buddy_it = g_buddy_subscriptions.find(contact_uri);
+    if (buddy_it == g_buddy_subscriptions.end()) {
+        // Try without the sip: prefix (some NOTIFY might strip it)
+        std::string contact_without_prefix = contact_uri;
+        if (contact_without_prefix.substr(0, 4) == "sip:") {
+            contact_without_prefix = contact_without_prefix.substr(4);
+            buddy_it = g_buddy_subscriptions.find(contact_without_prefix);
+            if (buddy_it == g_buddy_subscriptions.end()) {
+                // Also try with sip: prefix added back
+                std::string contact_with_prefix = "sip:" + contact_without_prefix;
+                buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
+            }
+        } else {
+            // Try adding sip: prefix
+            std::string contact_with_prefix = "sip:" + contact_uri;
+            buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
+        }
+        
+        if (buddy_it == g_buddy_subscriptions.end()) {
+            LOGW(">>> NOTIFY_HANDLER: Contact %s not found in subscription map", contact_uri);
+            LOGW(">>> NOTIFY_HANDLER: Active subscriptions:");
+            for (const auto &sub : g_buddy_subscriptions) {
+                LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
+            }
+            return PJ_FALSE;
+        }
+    }
+    
+    pjsua_buddy_id buddy_id = buddy_it->second;
+    LOGI(">>> NOTIFY_HANDLER: Found buddy_id=%d for contact=%s", buddy_id, contact_uri);
+    
+    // Store the parsed presence state for this buddy
+    g_buddy_last_dialog_state[buddy_id] = presence_state;
+    LOGI(">>> NOTIFY_HANDLER: Updated buddy %d dialog state to '%s'", buddy_id, presence_state);
+    
+    // Emit presence_updated event to Dart
+    std::string event_data = contact_uri;
+    event_data += ":";
+    event_data += presence_state;
+    
+    LOGI(">>> NOTIFY_HANDLER: Emitting presence_updated event: %s", event_data.c_str());
+    
+    JNIEnv *env = nullptr;
+    if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
+        jmethodID mid = env->GetMethodID(g_engineClass, "notifyPresenceUpdated", "(Ljava/lang/String;)V");
+        if (mid) {
+            jstring java_event = env->NewStringUTF(event_data.c_str());
+            env->CallVoidMethod(g_engine_instance, mid, java_event);
+            LOGI(">>> NOTIFY_HANDLER: Presence updated event sent to Java");
+            env->DeleteLocalRef(java_event);
+        } else {
+            LOGW(">>> NOTIFY_HANDLER: notifyPresenceUpdated method not found");
+        }
+    } else {
+        LOGW(">>> NOTIFY_HANDLER: Cannot call Java (g_vm=%p, g_engineClass=%p, g_engine_instance=%p)", 
+             (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
+    }
+    
+    return PJ_FALSE;  // Don't stop processing
+}
+
+// PJSIP module definition for NOTIFY interception
+static pjsip_module mod_notify_handler = {
+    NULL, NULL,                    // prev, next
+    { "mod-notify-handler", 18 },  // name
+    -1,                            // priority
+    PJSIP_MOD_PRIORITY_APPLICATION, // priority
+    NULL,                          // load()
+    NULL,                          // start()
+    NULL,                          // stop()
+    NULL,                          // unload()
+    &notify_msg_callback,          // on_rx_request()
+    NULL,                          // on_rx_response()
+    NULL,                          // on_tx_request()
+    NULL,                          // on_tx_response()
+    NULL,                          // on_tsx_state()
+};
+
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
     // Callback appelé quand l'état du buddy change
     // Ceci peut être appelé plusieurs fois: initial SENT, après 401 retry, après 200 OK, après NOTIFY
+    LOGI(">>> on_buddy_state: ===== CALLBACK FIRED for buddy_id=%d =====", buddy_id);
+    
     pjsua_buddy_info buddy_info;
     pjsua_buddy_get_info(buddy_id, &buddy_info);
     
     // Compter les appels au callback
     g_buddy_callback_counter[buddy_id]++;
     int call_count = g_buddy_callback_counter[buddy_id];
+    LOGI(">>> on_buddy_state: This is call #%d for buddy_id=%d", call_count, buddy_id);
     
     // Convertir sub_state en string lisible
     const char *sub_state_str = "UNKNOWN";
@@ -366,6 +585,23 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     if (buddy_info.sub_state == PJSIP_EVSUB_STATE_ACTIVE) {
         // Subscription is active - use the status field and status_text to determine presence
         presence_status = map_buddy_status_to_presence(buddy_info.status, &buddy_info.status_text);
+        
+        // Check if we have a more accurate dialog state from a recent NOTIFY
+        // Copy the dialog state string while holding the lock to avoid use-after-free
+        std::string stored_dialog_state;
+        {
+            std::lock_guard<std::mutex> lock_dialog(g_mutex);
+            auto dialog_it = g_buddy_last_dialog_state.find(buddy_id);
+            if (dialog_it != g_buddy_last_dialog_state.end() && !dialog_it->second.empty()) {
+                stored_dialog_state = dialog_it->second;  // Copy the string
+            }
+        }
+        
+        if (!stored_dialog_state.empty()) {
+            LOGI(">>> on_buddy_state: Found stored dialog state from NOTIFY: '%s' (overriding status-based '%s')", stored_dialog_state.c_str(), presence_status);
+            presence_status = stored_dialog_state.c_str();
+        }
+        
         LOGI(">>> on_buddy_state: Subscription ACTIVE ✓ → presence_status=%s (buddy_status=%d)", presence_status, buddy_info.status);
         
         // Log additional debug info if available (status_text may contain extra info)
@@ -437,6 +673,23 @@ static bool ensure_endpoint() {
         return false;
     }
 
+    // Register PJSIP module to intercept NOTIFY messages
+    {
+        pjsip_endpoint *endpt = pjsua_get_pjsip_endpt();
+        LOGI(">>> MODULE_INIT: pjsua_get_pjsip_endpt() returned: %p", (void*)endpt);
+        if (endpt) {
+            status = pjsip_endpt_register_module(endpt, &mod_notify_handler);
+            LOGI(">>> MODULE_INIT: pjsip_endpt_register_module() returned status=%d (PJ_SUCCESS=0)", status);
+            if (status == PJ_SUCCESS) {
+                LOGI(">>> MODULE_INIT: ✓ PJSIP module registered successfully for NOTIFY interception");
+            } else {
+                LOGW(">>> MODULE_INIT: ✗ Failed to register PJSIP module: %d", status);
+            }
+        } else {
+            LOGW(">>> MODULE_INIT: ✗ Could not get PJSIP endpoint (endpt is NULL)");
+        }
+    }
+
     // Enregistrer le callback personnalisé pour tracer les trames SIP
     LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
     pj_log_set_log_func(&pjsip_log_callback);
@@ -483,6 +736,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeInit(JNIEnv *env, jobject obj) {
         jclass localClass = env->GetObjectClass(obj);
         g_engineClass = static_cast<jclass>(env->NewGlobalRef(localClass));
         env->DeleteLocalRef(localClass);
+    }
+    // Store a global reference to the Engine instance for event emission
+    if (!g_engine_instance) {
+        g_engine_instance = env->NewGlobalRef(obj);
+        LOGI(">>> Engine instance stored globally for event emission");
     }
     return ensure_endpoint() ? JNI_TRUE : JNI_FALSE;
 }
@@ -969,6 +1227,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     
+    buddy_cfg.buddy_cb = &on_buddy_state;       // CRUCIAL: Enregistrer le callback pour être notifié des changements d'état
     buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
