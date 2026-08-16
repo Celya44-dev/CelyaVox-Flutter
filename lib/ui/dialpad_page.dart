@@ -407,7 +407,8 @@ class _DialpadPageState extends State<DialpadPage> {
         MaterialPageRoute(
           builder: (_) => InCallPage(
             engine: widget.engine,
-            callId: callee,
+            callId: '',  // Will be set by OutgoingCallEvent from native
+            callerId: callee,  // Display the dialed number
           ),
         ),
       );
