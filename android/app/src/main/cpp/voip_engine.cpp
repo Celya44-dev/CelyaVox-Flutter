@@ -386,7 +386,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg *msg = rdata->msg_info.msg;
     
     // Only process NOTIFY requests
-    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY) {
+    if (msg->type != PJSIP_REQUEST_MSG || pj_strcmp2(&msg->line.req.method.name, "NOTIFY") != 0) {
         return PJ_FALSE;
     }
     
