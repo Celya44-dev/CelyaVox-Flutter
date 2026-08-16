@@ -117,7 +117,7 @@ class _DialpadPageState extends State<DialpadPage> {
     try {
       final prefix = await ProvisioningChannel.getApiPrefixe();
       print('>>> _subscribePresenceWithPrefix: number=$number, prefix=$prefix');
-      await widget.engine.subscribePresence(number, prefix: prefix);
+      await widget.engine.subscribePresence(number, prefix: prefix ?? '');
       print('>>> _subscribePresenceWithPrefix SUCCESS: $number');
     } catch (e) {
       print('>>> _subscribePresenceWithPrefix ERROR: $e (trying without prefix)');
