@@ -951,7 +951,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     }
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring jnumber) {
     ensure_pj_thread_registered("jni");
     
@@ -959,7 +959,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) {
         LOGE("nativeMakeCall: Endpoint not ready or not registered");
-        return JNI_FALSE;
+        return -1;
     }
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
@@ -1018,11 +1018,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         pj_strerror(status, errbuf, sizeof(errbuf));
         LOGE("nativeMakeCall: Failed with status %d (%s)", status, errbuf);
         emit_event("call_error", errbuf);
-        return JNI_FALSE;
+        return -1;
     }
     LOGI("nativeMakeCall: Successfully initiated call %s (id=%d, URI stored for auth retry)", g_global_call_dest_uri, call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
-    return JNI_TRUE;
+    return call_id;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

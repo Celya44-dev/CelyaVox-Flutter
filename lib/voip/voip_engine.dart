@@ -25,8 +25,10 @@ class VoipEngine {
 
   Future<void> unregister() => _invoke('unregister');
 
-  Future<void> makeCall(String callee) =>
-      _invoke('makeCall', <String, dynamic>{'callee': callee});
+  Future<String> makeCall(String callee) async {
+    final result = await _invoke('makeCall', <String, dynamic>{'callee': callee});
+    return result?.toString() ?? '-1';
+  }
 
   Future<void> refreshAudio() => _invoke('refreshAudio');
 

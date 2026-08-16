@@ -88,7 +88,7 @@ class PjsipEngine private constructor() {
     }
 
     @Synchronized
-    fun makeCall(number: String): Boolean {
+    fun makeCall(number: String): Int {
         if (!initialized.get()) init()
         return nativeMakeCall(number)
     }
@@ -192,7 +192,7 @@ class PjsipEngine private constructor() {
     private external fun nativeInit(): Boolean
     private external fun nativeRegister(username: String, password: String, domain: String, proxy: String): Boolean
     private external fun nativeUnregister()
-    private external fun nativeMakeCall(number: String): Boolean
+    private external fun nativeMakeCall(number: String): Int
     private external fun nativeAcceptCall(callId: String): Boolean
     private external fun nativeHangupCall(callId: String): Boolean
     private external fun nativeRefreshAudio(): Boolean

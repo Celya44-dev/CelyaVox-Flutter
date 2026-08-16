@@ -146,9 +146,8 @@ class _InCallPageState extends State<InCallPage> {
         // Call is connected, stop the ringing/ringback tone
         _stopRinging();
         AppLogger.instance.log('>>> InCallPage.CallConnectedEvent: callId=${event.callId}, callerId=${event.callerId}');
-        if (mounted && event.callId.isNotEmpty) {
+        if (mounted) {
           setState(() {
-            _activeCallId = event.callId;
             // Only update callerId if the event has one, preserve the initial value if empty
             if (event.callerId.isNotEmpty) {
               _activeCallerId = event.callerId;
@@ -159,10 +158,8 @@ class _InCallPageState extends State<InCallPage> {
           });
         }
       } else if (event is OutgoingCallEvent) {
-        AppLogger.instance.log('>>> InCallPage.OutgoingCallEvent: callId=${event.callId}');
-        if (mounted && event.callId.isNotEmpty) {
-          setState(() => _activeCallId = event.callId);
-        }
+        AppLogger.instance.log('>>> InCallPage.OutgoingCallEvent: callId=${event.callId} (callId is immutable, not updating)');
+        // callId cannot be updated - it's set at initialization
       } else if (event is CallEndedEvent) {
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
@@ -238,7 +235,6 @@ class _InCallPageState extends State<InCallPage> {
   Future<void> _hangup() async {
     setState(() => _isHangingUp = true);
     final callId = _activeCallId.isNotEmpty ? _activeCallId : widget.callId;
-    AppLogger.instance.log('>>> InCallPage._hangup: _activeCallId=$_activeCallId, widget.callId=${widget.callId}, final callId=$callId');
     try {
       await widget.engine.hangupCall(callId);
       if (!mounted) return;
