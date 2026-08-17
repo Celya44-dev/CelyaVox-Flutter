@@ -28,7 +28,6 @@ static std::string g_account_password = "";  // Password du compte SIP (pour aut
 // Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
 static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
-static char g_global_cred_realm_empty[2] = "";  // Empty realm = catch-all for any unknown realm
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
 static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
@@ -379,11 +378,11 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for NOTIFY requests
-static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
+static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
     LOGI(">>> notify_msg_callback: MESSAGE CALLBACK INVOKED (called for every SIP message)");
     
     if (!rdata || !rdata->msg_info.msg) {
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     pjsip_msg *msg = rdata->msg_info.msg;
@@ -392,13 +391,13 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     
     // Only process NOTIFY requests - compare method name string
     if (msg->type != PJSIP_REQUEST_MSG) {
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     // Compare with "NOTIFY" string
     if (msg->line.req.method.name.slen != 6 || 
         pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
@@ -407,13 +406,13 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg_body *body = msg->body;
     if (!body || !body->data) {
         LOGW(">>> NOTIFY_HANDLER: NOTIFY has no message body");
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     // Check if this is dialog-info+xml content type
     if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
         LOGW(">>> NOTIFY_HANDLER: No content type specified");
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     pj_str_t type = body->content_type.type;
@@ -424,7 +423,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
           (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
         LOGI(">>> NOTIFY_HANDLER: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
              (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     LOGI(">>> NOTIFY_HANDLER: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
@@ -436,29 +435,25 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
         LOGW(">>> NOTIFY_HANDLER: Failed to parse presence state from XML");
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
     const char *uri_start = strstr(xml_body, "uri=\"");
     if (!uri_start) {
         LOGW(">>> NOTIFY_HANDLER: No uri= attribute found in XML dialog");
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     
     uri_start += 5;  // Skip "uri=\""
     const char *uri_end = strchr(uri_start, '"');
     if (!uri_end) {
         LOGW(">>> NOTIFY_HANDLER: No closing quote for uri= attribute");
-        return PJ_FALSE;
-    }
-    
-    // Extract contact URI (sip:username@domain)
-    int uri_len = uri_end - uri_start;
+        return PJSIP_MODULE_PROC_CONTINUE;
     static char contact_uri[256];
     if (uri_len >= 256) {
         LOGW(">>> NOTIFY_HANDLER: Contact URI too long: %d", uri_len);
-        return PJ_FALSE;
+        return PJSIP_MODULE_PROC_CONTINUE;
     }
     strncpy(contact_uri, uri_start, uri_len);
     contact_uri[uri_len] = '\0';
@@ -492,7 +487,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
             for (const auto &sub : g_buddy_subscriptions) {
                 LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
             }
-            return PJ_FALSE;
+            return PJSIP_MODULE_PROC_CONTINUE;
         }
     }
     
@@ -526,7 +521,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
              (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
     }
     
-    return PJ_FALSE;  // Don't stop processing
+    return PJSIP_MODULE_PROC_CONTINUE;  // Don't stop processing
 }
 
 // PJSIP module definition for NOTIFY interception
@@ -854,7 +849,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: Account URIs (in static buffers for persistence):");
     LOGI("    - id=%s", g_global_acc_id);
     LOGI("    - reg_uri=%s", g_global_acc_reg_uri);
-    acc_cfg.cred_count = 3;  // CRITICAL FIX: 3 credentials to handle all 401 scenarios
+    acc_cfg.cred_count = 2;
     
     // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
     // IMPORTANT: Use static buffers (g_global_cred_*) not JNI strings!
@@ -880,46 +875,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: Credential[1] (realm=wildcard, algo=MD5):");
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
-    
-    // Credential 3: realm="" (empty = catch-all for ANY realm not matched by above)
-    // CRITICAL FIX FOR 401: PJSIP 2.17 needs empty realm as fallback for unknown realms
-    acc_cfg.cred_info[2].realm = pj_str_t{g_global_cred_realm_empty, 0};  // Empty realm
-    acc_cfg.cred_info[2].scheme = pj_str_t{const_cast<char *>("digest"), 6};
-    acc_cfg.cred_info[2].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
-    acc_cfg.cred_info[2].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
-    acc_cfg.cred_info[2].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
-    acc_cfg.cred_info[2].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
-    
-    LOGI(">>> nativeRegister: Credential[2] (realm=EMPTY/catch-all, algo=MD5):");
-    LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[2].username.ptr, acc_cfg.cred_info[2].username.ptr);
-    LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[2].data.ptr, acc_cfg.cred_info[2].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        // Force port 5060 for UDP SIP  
+        // Use proxy as-is without forcing transport
+        // Let PJSIP negotiate transport naturally
         memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
-        std::string proxy_str(proxy);
-        
-        // Check if proxy already has sip: prefix and port
-        if (proxy_str.find("sip:") == std::string::npos) {
-            // No sip: prefix - add it with port 5060
-            if (proxy_str.find(':') == std::string::npos) {
-                // No port specified - add :5060
-                snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                         "sip:%s:5060", proxy);
-            } else {
-                // Port already specified - keep as-is with sip: prefix
-                snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                         "sip:%s", proxy);
-            }
-        } else {
-            // Already has sip: prefix - use as-is
-            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                     "%s", proxy);
-        }
-        
+        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
+                 "%s", proxy);
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy CONFIGURED (port 5060): %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy CONFIGURED: %s", g_global_proxy_with_transport);
     } else {
         acc_cfg.proxy_cnt = 0;
         LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
@@ -996,7 +961,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     }
 }
 
-extern "C" JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring jnumber) {
     ensure_pj_thread_registered("jni");
     
@@ -1004,17 +969,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) {
         LOGE("nativeMakeCall: Endpoint not ready or not registered");
-        return -1;
+        return JNI_FALSE;
     }
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     
     // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    // Format: sip:extension@domain (no port - proxy handles routing with port 5060)
     snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
     
-    LOGI(">>> nativeMakeCall: Destination=%s (port 5060 handled by proxy)", g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
     
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
@@ -1068,7 +1032,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     }
     LOGI("nativeMakeCall: Successfully initiated call %s (id=%d, URI stored for auth retry)", g_global_call_dest_uri, call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
-    return call_id;
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
