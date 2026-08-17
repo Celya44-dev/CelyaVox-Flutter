@@ -527,7 +527,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
 // PJSIP module definition for NOTIFY interception
 static pjsip_module mod_notify_handler = {
     NULL, NULL,                              // prev, next
-    { (char*)"mod-notify-handler", 18 },    // name - cast string literal to char*
+    { (char*)"mod-notify-handler", 18 },    // name
     -1,                                      // priority
     PJSIP_MOD_PRIORITY_APPLICATION,         // priority
     NULL,                          // load()
