@@ -540,6 +540,14 @@ static void on_buddy_state(pjsua_buddy_id buddy_id) {
     __android_log_write(ANDROID_LOG_INFO, "PjsipNative", ">>> on_buddy_state: ===== CALLBACK FIRED ===== (logging BEFORE any logic)");
     LOGI(">>> on_buddy_state: ===== CALLBACK FIRED for buddy_id=%d =====", buddy_id);
     
+    pjsua_buddy_info buddy_info;
+    pjsua_buddy_get_info(buddy_id, &buddy_info);
+    
+    // Compter les appels au callback
+    g_buddy_callback_counter[buddy_id]++;
+    int call_count = g_buddy_callback_counter[buddy_id];
+    LOGI(">>> on_buddy_state: This is call #%d for buddy_id=%d", call_count, buddy_id);
+    
     // Convertir sub_state en string lisible
     const char *sub_state_str = "UNKNOWN";
     switch (buddy_info.sub_state) {
