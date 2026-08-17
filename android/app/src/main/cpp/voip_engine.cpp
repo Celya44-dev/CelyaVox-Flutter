@@ -378,11 +378,11 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for ALL SIP transactions including NOTIFY
-static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event) {
+static void notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event) {
     LOGI(">>> notify_tsx_callback: TRANSACTION CALLBACK INVOKED, event type=%d", event ? event->type : -1);
     
     if (!tsx || !tsx->method.name.ptr) {
-        return PJ_FALSE;
+        return;
     }
     
     pj_str_t method = tsx->method.name;
@@ -391,12 +391,12 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
     // Only process NOTIFY requests that we RECEIVE
     if (tsx->method.name.slen != 6 || 
         pj_strnicmp2(&tsx->method.name, "NOTIFY", 6) != 0) {
-        return PJ_FALSE;
+        return;
     }
     
     if (tsx->role != PJSIP_ROLE_UAS) {
         // We're only interested in NOTIFY messages we receive (UAS=User Agent Server)
-        return PJ_FALSE;
+        return;
     }
     
     LOGI(">>> notify_tsx_callback: ===== NOTIFY TRANSACTION RECEIVED =====");
@@ -409,18 +409,18 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
         LOGI(">>> notify_tsx_callback: Got message from RX_MSG event");
     } else {
         LOGW(">>> notify_tsx_callback: Event type %d is not RX_MSG, skipping", event->type);
-        return PJ_FALSE;
+        return;
     }
     
     if (!msg || !msg->body || !msg->body->data) {
         LOGW(">>> notify_tsx_callback: NOTIFY has no message body");
-        return PJ_FALSE;
+        return;
     }
     
     // Check if this is dialog-info+xml content type
     if (!msg->body->content_type.type.ptr || !msg->body->content_type.subtype.ptr) {
         LOGW(">>> notify_tsx_callback: No content type specified");
-        return PJ_FALSE;
+        return;
     }
     
     pj_str_t type = msg->body->content_type.type;
@@ -431,7 +431,7 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
           (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
         LOGI(">>> notify_tsx_callback: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
              (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
-        return PJ_FALSE;
+        return;
     }
     
     LOGI(">>> notify_tsx_callback: Found dialog-info+xml body, length=%u bytes", (unsigned)msg->body->len);
@@ -443,21 +443,21 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
         LOGW(">>> NOTIFY_HANDLER: Failed to parse presence state from XML");
-        return PJ_FALSE;
+        return;
     }
     
     // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
     const char *uri_start = strstr(xml_body, "uri=\"");
     if (!uri_start) {
         LOGW(">>> NOTIFY_HANDLER: No uri= attribute found in XML dialog");
-        return PJ_FALSE;
+        return;
     }
     
     uri_start += 5;  // Skip "uri=\""
     const char *uri_end = strchr(uri_start, '"');
     if (!uri_end) {
         LOGW(">>> NOTIFY_HANDLER: No closing quote for uri= attribute");
-        return PJ_FALSE;
+        return;
     }
     
     // Extract contact URI (sip:username@domain)
@@ -465,7 +465,7 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
     static char contact_uri[256];
     if (uri_len >= 256) {
         LOGW(">>> NOTIFY_HANDLER: Contact URI too long: %d", uri_len);
-        return PJ_FALSE;
+        return;
     }
     strncpy(contact_uri, uri_start, uri_len);
     contact_uri[uri_len] = '\0';
@@ -499,7 +499,7 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
             for (const auto &sub : g_buddy_subscriptions) {
                 LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
             }
-            return PJ_FALSE;
+            return;
         }
     }
     
@@ -533,7 +533,7 @@ static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *
              (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
     }
     
-    return PJ_FALSE;  // Don't stop processing
+    return;  // Don't stop processing
 }
 
 // PJSIP module definition for NOTIFY interception
@@ -684,7 +684,7 @@ static bool ensure_endpoint() {
     // Garder 8 kHz pour éviter l'échec de création de media session.
     media_cfg.clock_rate = 8000;
     media_cfg.snd_clock_rate = 8000;
-    media_cfg.enable_ice = PJ_FALSE;
+    media_cfg.enable_ice = PJSIP_MODULE_PROC_CONTINUE;
 
     status = pjsua_init(&ua_cfg, &log_cfg, &media_cfg);
     if (status != PJ_SUCCESS) {
@@ -973,7 +973,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     ensure_pj_thread_registered("jni");
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_acc_id != PJSUA_INVALID_ID) {
-        pj_status_t st = pjsua_acc_set_registration(g_acc_id, PJ_FALSE);
+        pj_status_t st = pjsua_acc_set_registration(g_acc_id, PJSIP_MODULE_PROC_CONTINUE);
         if (st == PJ_SUCCESS) {
             LOGI("Unregister requested (REGISTER expires=0) for account id=%d", g_acc_id);
         } else {
@@ -1255,7 +1255,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     
     // IMPORTANT: Pour BLF (Busy Lamp Field), utiliser subscribe_dlg_event
     // Non pas subscribe (qui est pour la presence classique)
-    buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
+    buddy_cfg.subscribe = PJSIP_MODULE_PROC_CONTINUE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     // Note: buddy_cb doesn't exist in pjsua_buddy_config - NOTIFY messages handled by notify_msg_callback module
     
