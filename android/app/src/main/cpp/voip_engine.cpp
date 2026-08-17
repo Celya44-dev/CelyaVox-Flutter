@@ -527,7 +527,7 @@ static pj_bool_t notify_rx_request_callback(pjsip_rx_data *rdata) {
              (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
     }
     
-    return;  // Don't stop processing
+    return PJ_FALSE;  // Don't stop processing
 }
 
 // PJSIP module definition for NOTIFY interception
