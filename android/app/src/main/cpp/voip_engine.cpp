@@ -386,7 +386,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg *msg = rdata->msg_info.msg;
     
     // Only process NOTIFY requests
-    if (msg->type != PJSIP_REQUEST_MSG || pj_strcmp2(&msg->line.req.method.name, "NOTIFY") != 0) {
+    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY_METHOD) {
         return PJ_FALSE;
     }
     
@@ -470,7 +470,7 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
             }
         } else {
             // Try adding sip: prefix
-            std::string contact_with_prefix = std::string("sip:") + contact_uri;
+            std::string contact_with_prefix = "sip:" + contact_uri;
             buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
         }
         
@@ -535,17 +535,10 @@ static pjsip_module mod_notify_handler = {
 };
 
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
-    // Callback appelé quand l'état du buddy change
-    // Ceci peut être appelé plusieurs fois: initial SENT, après 401 retry, après 200 OK, après NOTIFY
+    // This callback is called by PJSUA when buddy state changes
+    // Log IMMEDIATELY to verify callback is being invoked at all
+    __android_log_write(ANDROID_LOG_INFO, "PjsipNative", ">>> on_buddy_state: ===== CALLBACK FIRED ===== (logging BEFORE any logic)");
     LOGI(">>> on_buddy_state: ===== CALLBACK FIRED for buddy_id=%d =====", buddy_id);
-    
-    pjsua_buddy_info buddy_info;
-    pjsua_buddy_get_info(buddy_id, &buddy_info);
-    
-    // Compter les appels au callback
-    g_buddy_callback_counter[buddy_id]++;
-    int call_count = g_buddy_callback_counter[buddy_id];
-    LOGI(">>> on_buddy_state: This is call #%d for buddy_id=%d", call_count, buddy_id);
     
     // Convertir sub_state en string lisible
     const char *sub_state_str = "UNKNOWN";
@@ -951,7 +944,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     }
 }
 
-extern "C" JNIEXPORT jint JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring jnumber) {
     ensure_pj_thread_registered("jni");
     
@@ -959,7 +952,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) {
         LOGE("nativeMakeCall: Endpoint not ready or not registered");
-        return -1;
+        return JNI_FALSE;
     }
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
@@ -1018,11 +1011,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         pj_strerror(status, errbuf, sizeof(errbuf));
         LOGE("nativeMakeCall: Failed with status %d (%s)", status, errbuf);
         emit_event("call_error", errbuf);
-        return -1;
+        return JNI_FALSE;
     }
     LOGI("nativeMakeCall: Successfully initiated call %s (id=%d, URI stored for auth retry)", g_global_call_dest_uri, call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
-    return call_id;
+    return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1227,7 +1220,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     
-    // buddy_cfg.buddy_cb = &on_buddy_state;       // Callback not available in this PJSIP version
+    buddy_cfg.buddy_cb = &on_buddy_state;       // CRUCIAL: Enregistrer le callback pour être notifié des changements d'état
+    LOGI(">>> nativeSubscribePresence: buddy_cfg.buddy_cb set to on_buddy_state function pointer (%p)", (void*)&on_buddy_state);
+    
     buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
     
