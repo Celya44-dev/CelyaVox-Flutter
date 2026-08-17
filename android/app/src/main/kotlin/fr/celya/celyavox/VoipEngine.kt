@@ -98,13 +98,13 @@ class VoipEngine(
         sipEngine.unregister()
     }
 
-    fun startCall(callee: String): Boolean {
+    fun startCall(callee: String): Int {
         Log.i(TAG, "VoipEngine.startCall callee=$callee")
         // Initialize audio for outgoing calls (similar to incoming calls in VoipConnection.startAudio())
         initCallAudio()
         // Activate real audio devices in PJSIP (was using null audio at app startup)
         refreshAudio()
-        return sipEngine.makeCall(callee)
+        return sipEngine.makeCall(callee)  // Returns callId (>= 0) or -1 on error
     }
 
     fun endCall(callId: String): Boolean {
