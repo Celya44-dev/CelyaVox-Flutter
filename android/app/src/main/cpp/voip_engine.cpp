@@ -378,11 +378,11 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for NOTIFY requests
-static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
+static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     LOGI(">>> notify_msg_callback: MESSAGE CALLBACK INVOKED (called for every SIP message)");
     
     if (!rdata || !rdata->msg_info.msg) {
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     pjsip_msg *msg = rdata->msg_info.msg;
@@ -391,13 +391,13 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
     
     // Only process NOTIFY requests - compare method name string
     if (msg->type != PJSIP_REQUEST_MSG) {
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     // Compare with "NOTIFY" string
     if (msg->line.req.method.name.slen != 6 || 
         pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
@@ -406,13 +406,13 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg_body *body = msg->body;
     if (!body || !body->data) {
         LOGW(">>> NOTIFY_HANDLER: NOTIFY has no message body");
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     // Check if this is dialog-info+xml content type
     if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
         LOGW(">>> NOTIFY_HANDLER: No content type specified");
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     pj_str_t type = body->content_type.type;
@@ -423,7 +423,7 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
           (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
         LOGI(">>> NOTIFY_HANDLER: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
              (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     LOGI(">>> NOTIFY_HANDLER: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
@@ -435,25 +435,29 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
         LOGW(">>> NOTIFY_HANDLER: Failed to parse presence state from XML");
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
     const char *uri_start = strstr(xml_body, "uri=\"");
     if (!uri_start) {
         LOGW(">>> NOTIFY_HANDLER: No uri= attribute found in XML dialog");
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     
     uri_start += 5;  // Skip "uri=\""
     const char *uri_end = strchr(uri_start, '"');
     if (!uri_end) {
         LOGW(">>> NOTIFY_HANDLER: No closing quote for uri= attribute");
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
+    }
+    
+    // Extract contact URI (sip:username@domain)
+    int uri_len = uri_end - uri_start;
     static char contact_uri[256];
     if (uri_len >= 256) {
         LOGW(">>> NOTIFY_HANDLER: Contact URI too long: %d", uri_len);
-        return PJSIP_MODULE_PROC_CONTINUE;
+        return PJ_FALSE;
     }
     strncpy(contact_uri, uri_start, uri_len);
     contact_uri[uri_len] = '\0';
@@ -487,7 +491,7 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
             for (const auto &sub : g_buddy_subscriptions) {
                 LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
             }
-            return PJSIP_MODULE_PROC_CONTINUE;
+            return PJ_FALSE;
         }
     }
     
@@ -521,7 +525,7 @@ static pjsip_module_proc_result notify_msg_callback(pjsip_rx_data *rdata) {
              (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
     }
     
-    return PJSIP_MODULE_PROC_CONTINUE;  // Don't stop processing
+    return PJ_FALSE;  // Don't stop processing
 }
 
 // PJSIP module definition for NOTIFY interception
