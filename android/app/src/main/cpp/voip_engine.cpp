@@ -28,7 +28,6 @@ static std::string g_account_password = "";  // Password du compte SIP (pour aut
 // Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
 static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
-static char g_global_cred_realm_empty[2] = "";  // Empty realm = catch-all for any unknown realm
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
 static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
@@ -380,11 +379,15 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for NOTIFY requests
 static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
+    LOGI(">>> notify_msg_callback: MESSAGE CALLBACK INVOKED (called for every SIP message)");
+    
     if (!rdata || !rdata->msg_info.msg) {
         return PJ_FALSE;
     }
     
     pjsip_msg *msg = rdata->msg_info.msg;
+    LOGI(">>> notify_msg_callback: msg->type=%d (PJSIP_REQUEST_MSG=%d), method.name=%.*s", 
+         msg->type, PJSIP_REQUEST_MSG, (int)msg->line.req.method.name.slen, msg->line.req.method.name.ptr);
     
     // Only process NOTIFY requests - compare method name string
     if (msg->type != PJSIP_REQUEST_MSG) {
@@ -850,7 +853,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: Account URIs (in static buffers for persistence):");
     LOGI("    - id=%s", g_global_acc_id);
     LOGI("    - reg_uri=%s", g_global_acc_reg_uri);
-    acc_cfg.cred_count = 3;
+    acc_cfg.cred_count = 3;  // CRITICAL FIX: 3 credentials to handle all 401 scenarios
     
     // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
     // IMPORTANT: Use static buffers (g_global_cred_*) not JNI strings!
@@ -891,22 +894,31 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[2].data.ptr, acc_cfg.cred_info[2].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        // Force port 5060 for UDP SIP
+        // Force port 5060 for UDP SIP  
         memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
-        // Check if proxy already has a port
         std::string proxy_str(proxy);
-        if (proxy_str.find(':') == std::string::npos) {
-            // No port specified - add :5060
-            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
-                     "sip:%s:5060", proxy);
+        
+        // Check if proxy already has sip: prefix and port
+        if (proxy_str.find("sip:") == std::string::npos) {
+            // No sip: prefix - add it with port 5060
+            if (proxy_str.find(':') == std::string::npos) {
+                // No port specified - add :5060
+                snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                         "sip:%s:5060", proxy);
+            } else {
+                // Port already specified - keep as-is with sip: prefix
+                snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                         "sip:%s", proxy);
+            }
         } else {
-            // Port already specified - use as-is
-            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
+            // Already has sip: prefix - use as-is
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
                      "%s", proxy);
         }
+        
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy CONFIGURED (port 5060 forced): %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy CONFIGURED (port 5060): %s", g_global_proxy_with_transport);
     } else {
         acc_cfg.proxy_cnt = 0;
         LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
@@ -983,7 +995,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     }
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
+extern "C" JNIEXPORT jint JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring jnumber) {
     ensure_pj_thread_registered("jni");
     
@@ -991,16 +1003,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     if (!ensure_endpoint() || g_acc_id == PJSUA_INVALID_ID) {
         LOGE("nativeMakeCall: Endpoint not ready or not registered");
-        return JNI_FALSE;
+        return -1;
     }
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     
-    // Use static buffer for call destination with port 5060 (CRITICAL: PJSIP needs it to persist during auth retry)
+    // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060", number);
+    // Format: sip:extension@domain (no port - proxy handles routing with port 5060)
+    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
     
-    LOGI(">>> nativeMakeCall: Destination=%s (port 5060 forced)", g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: Destination=%s (port 5060 handled by proxy)", g_global_call_dest_uri);
     
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
@@ -1054,7 +1067,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     }
     LOGI("nativeMakeCall: Successfully initiated call %s (id=%d, URI stored for auth retry)", g_global_call_dest_uri, call_id);
     emit_event("outgoing_call", std::to_string(call_id).c_str());
-    return JNI_TRUE;
+    return call_id;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
