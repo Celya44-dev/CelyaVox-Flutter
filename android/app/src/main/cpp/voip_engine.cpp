@@ -21,6 +21,7 @@ static jclass g_engineClass = nullptr;
 static std::mutex g_mutex;
 static bool g_initialized = false;
 static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
+static pjsua_transport_id g_transport_id = PJSUA_INVALID_ID;  // UDP transport ID - force account to use UDP only
 static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::string g_account_username = "";  // Username du compte SIP (pour auth Digest des SUBSCRIBE)
@@ -717,12 +718,13 @@ static bool ensure_endpoint() {
     pjsua_transport_config trans_cfg;
     pjsua_transport_config_default(&trans_cfg);
     trans_cfg.port = 5060;
-    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, nullptr);
+    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, &g_transport_id);
     if (status != PJ_SUCCESS) {
         LOGE("transport create failed: %d", status);
         pjsua_destroy();
         return false;
     }
+    LOGI(">>> pjsua_init: UDP transport created with ID=%d (will force all accounts to use UDP)", g_transport_id);
 
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
@@ -919,6 +921,15 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Ensures Digest auth retry works for all modules using account credentials
     acc_cfg.use_shared_auth = PJ_TRUE;
     LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
+
+    // CRITICAL: Force account to use UDP transport only to prevent "Unsupported transport" errors
+    // This overrides any server-suggested TCP and forces UDP outbound for all SIP requests
+    if (g_transport_id != PJSUA_INVALID_ID) {
+        acc_cfg.transport_id = g_transport_id;
+        LOGI(">>> nativeRegister: FORCE transport_id=%d (UDP only - no TCP fallback)", g_transport_id);
+    } else {
+        LOGW(">>> nativeRegister: WARNING - g_transport_id not set, may allow TCP fallback!");
+    }
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
