@@ -378,104 +378,93 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 }
 
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
-// This callback is invoked for ALL SIP transactions including NOTIFY
-static void notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event) {
-    static int call_count = 0;
-    call_count++;
-    LOGI(">>> notify_tsx_callback: INVOKED COUNT #%d, tsx=%p, event=%p, event_type=%d", 
-         call_count, (void*)tsx, (void*)event, event ? event->type : -1);
+// This callback is invoked for ALL received SIP requests
+static pj_bool_t notify_rx_request_callback(pjsip_rx_data *rdata) {
+    static int msg_count = 0;
+    msg_count++;
     
-    if (!tsx || !tsx->method.name.ptr) {
-        return;
+    if (!rdata || !rdata->msg_info.msg) {
+        return PJ_FALSE;
     }
     
-    pj_str_t method = tsx->method.name;
-    LOGI(">>> notify_tsx_callback: method=%.*s, role=%d, state=%d", 
-         (int)method.slen, method.ptr, tsx->role, tsx->state);
-    
-    // Only process NOTIFY requests that we RECEIVE
-    if (tsx->method.name.slen != 6 || 
-        pj_strnicmp2(&tsx->method.name, "NOTIFY", 6) != 0) {
-        return;
+    pjsip_msg *msg = rdata->msg_info.msg;
+    if (msg->type != PJSIP_REQUEST_MSG) {
+        return PJ_FALSE;
     }
     
-    if (tsx->role != PJSIP_ROLE_UAS) {
-        // We're only interested in NOTIFY messages we receive (UAS=User Agent Server)
-        return;
+    // Log EVERY request to see what arrives
+    LOGI(">>> notify_rx_request: REQUEST #%d: method=%.*s", 
+         msg_count, (int)msg->line.req.method.name.slen, msg->line.req.method.name.ptr);
+    
+    // Only process NOTIFY requests
+    if (msg->line.req.method.name.slen != 6 || 
+        pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
+        return PJ_FALSE;
     }
     
-    LOGI(">>> notify_tsx_callback: ===== NOTIFY TRANSACTION RECEIVED =====");
+    LOGI(">>> notify_rx_request: ===== NOTIFY REQUEST #%d RECEIVED =====", msg_count);
     
-    // Get the received message from the transaction event
-    // For incoming NOTIFY, the message is in the received data
-    pjsip_msg *msg = NULL;
-    if (event->type == PJSIP_EVENT_RX_MSG) {
-        msg = event->body.rx_msg.rdata->msg_info.msg;
-        LOGI(">>> notify_tsx_callback: Got message from RX_MSG event");
-    } else {
-        LOGW(">>> notify_tsx_callback: Event type %d is not RX_MSG, skipping", event->type);
-        return;
-    }
-    
-    if (!msg || !msg->body || !msg->body->data) {
-        LOGW(">>> notify_tsx_callback: NOTIFY has no message body");
-        return;
+    // We already have rdata->msg_info.msg above, use it directly
+    pjsip_msg_body *body = msg->body;
+    if (!body || !body->data) {
+        LOGW(">>> notify_rx_request: NOTIFY has no message body");
+        return PJ_FALSE;
     }
     
     // Check if this is dialog-info+xml content type
-    if (!msg->body->content_type.type.ptr || !msg->body->content_type.subtype.ptr) {
-        LOGW(">>> notify_tsx_callback: No content type specified");
-        return;
+    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
+        LOGW(">>> notify_rx_request: No content type specified");
+        return PJ_FALSE;
     }
     
-    pj_str_t type = msg->body->content_type.type;
-    pj_str_t subtype = msg->body->content_type.subtype;
+    pj_str_t type = body->content_type.type;
+    pj_str_t subtype = body->content_type.subtype;
     
     // Look for "application/dialog-info+xml"
     if (!(pj_stricmp2(&type, "application") == 0 && 
           (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
-        LOGI(">>> notify_tsx_callback: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
+        LOGI(">>> notify_rx_request: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
              (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
-        return;
+        return PJ_FALSE;
     }
     
-    LOGI(">>> notify_tsx_callback: Found dialog-info+xml body, length=%u bytes", (unsigned)msg->body->len);
+    LOGI(">>> notify_rx_request: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
     
     // Parse the XML body
-    const char *xml_body = (const char *)msg->body->data;
-    int xml_len = msg->body->len;
+    const char *xml_body = (const char *)body->data;
+    int xml_len = body->len;
     
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
-        LOGW(">>> NOTIFY_HANDLER: Failed to parse presence state from XML");
-        return;
+        LOGW(">>> notify_rx_request: Failed to parse presence state from XML");
+        return PJ_FALSE;
     }
     
     // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
     const char *uri_start = strstr(xml_body, "uri=\"");
     if (!uri_start) {
-        LOGW(">>> NOTIFY_HANDLER: No uri= attribute found in XML dialog");
-        return;
+        LOGW(">>> notify_rx_request: No uri= attribute found in XML dialog");
+        return PJ_FALSE;
     }
     
     uri_start += 5;  // Skip "uri=\""
     const char *uri_end = strchr(uri_start, '"');
     if (!uri_end) {
-        LOGW(">>> NOTIFY_HANDLER: No closing quote for uri= attribute");
-        return;
+        LOGW(">>> notify_rx_request: No closing quote for uri= attribute");
+        return PJ_FALSE;
     }
     
     // Extract contact URI (sip:username@domain)
     int uri_len = uri_end - uri_start;
     static char contact_uri[256];
     if (uri_len >= 256) {
-        LOGW(">>> NOTIFY_HANDLER: Contact URI too long: %d", uri_len);
-        return;
+        LOGW(">>> notify_rx_request: Contact URI too long: %d", uri_len);
+        return PJ_FALSE;
     }
     strncpy(contact_uri, uri_start, uri_len);
     contact_uri[uri_len] = '\0';
     
-    LOGI(">>> NOTIFY_HANDLER: Extracted contact from XML: %s", contact_uri);
+    LOGI(">>> notify_rx_request: Extracted contact from XML: %s", contact_uri);
     
     // Look up the buddy_id from our subscription map
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -499,28 +488,28 @@ static void notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event
         }
         
         if (buddy_it == g_buddy_subscriptions.end()) {
-            LOGW(">>> NOTIFY_HANDLER: Contact %s not found in subscription map", contact_uri);
-            LOGW(">>> NOTIFY_HANDLER: Active subscriptions:");
+            LOGW(">>> notify_rx_request: Contact %s not found in subscription map", contact_uri);
+            LOGW(">>> notify_rx_request: Active subscriptions:");
             for (const auto &sub : g_buddy_subscriptions) {
                 LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
             }
-            return;
+            return PJ_FALSE;
         }
     }
     
     pjsua_buddy_id buddy_id = buddy_it->second;
-    LOGI(">>> NOTIFY_HANDLER: Found buddy_id=%d for contact=%s", buddy_id, contact_uri);
+    LOGI(">>> notify_rx_request: Found buddy_id=%d for contact=%s", buddy_id, contact_uri);
     
     // Store the parsed presence state for this buddy
     g_buddy_last_dialog_state[buddy_id] = presence_state;
-    LOGI(">>> NOTIFY_HANDLER: Updated buddy %d dialog state to '%s'", buddy_id, presence_state);
+    LOGI(">>> notify_rx_request: Updated buddy %d dialog state to '%s'", buddy_id, presence_state);
     
     // Emit presence_updated event to Dart
     std::string event_data = contact_uri;
     event_data += ":";
     event_data += presence_state;
     
-    LOGI(">>> NOTIFY_HANDLER: Emitting presence_updated event: %s", event_data.c_str());
+    LOGI(">>> notify_rx_request: Emitting presence_updated event: %s", event_data.c_str());
     
     JNIEnv *env = nullptr;
     if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
@@ -528,13 +517,13 @@ static void notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event
         if (mid) {
             jstring java_event = env->NewStringUTF(event_data.c_str());
             env->CallVoidMethod(g_engine_instance, mid, java_event);
-            LOGI(">>> NOTIFY_HANDLER: Presence updated event sent to Java");
+            LOGI(">>> notify_rx_request: Presence updated event sent to Java");
             env->DeleteLocalRef(java_event);
         } else {
-            LOGW(">>> NOTIFY_HANDLER: notifyPresenceUpdated method not found");
+            LOGW(">>> notify_rx_request: notifyPresenceUpdated method not found");
         }
     } else {
-        LOGW(">>> NOTIFY_HANDLER: Cannot call Java (g_vm=%p, g_engineClass=%p, g_engine_instance=%p)", 
+        LOGW(">>> notify_rx_request: Cannot call Java (g_vm=%p, g_engineClass=%p, g_engine_instance=%p)", 
              (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
     }
     
@@ -551,11 +540,11 @@ static pjsip_module mod_notify_handler = {
     NULL,                          // start()
     NULL,                          // stop()
     NULL,                          // unload()
-    NULL,                          // on_rx_request() - NOT USED
+    &notify_rx_request_callback,   // on_rx_request() - Capture incoming NOTIFY requests
     NULL,                          // on_rx_response()
     NULL,                          // on_tx_request()
     NULL,                          // on_tx_response()
-    &notify_tsx_state_callback,    // on_tsx_state() - Use this instead to capture NOTIFY
+    NULL,                          // on_tsx_state()
 };
 
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
