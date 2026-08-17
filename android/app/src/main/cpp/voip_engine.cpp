@@ -684,7 +684,7 @@ static bool ensure_endpoint() {
     // Garder 8 kHz pour éviter l'échec de création de media session.
     media_cfg.clock_rate = 8000;
     media_cfg.snd_clock_rate = 8000;
-    media_cfg.enable_ice = PJSIP_MODULE_PROC_CONTINUE;
+    media_cfg.enable_ice = PJ_TRUE;
 
     status = pjsua_init(&ua_cfg, &log_cfg, &media_cfg);
     if (status != PJ_SUCCESS) {
@@ -973,7 +973,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeUnregister(JNIEnv *, jobject) {
     ensure_pj_thread_registered("jni");
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_acc_id != PJSUA_INVALID_ID) {
-        pj_status_t st = pjsua_acc_set_registration(g_acc_id, PJSIP_MODULE_PROC_CONTINUE);
+        pj_status_t st = pjsua_acc_set_registration(g_acc_id, PJ_FALSE);
         if (st == PJ_SUCCESS) {
             LOGI("Unregister requested (REGISTER expires=0) for account id=%d", g_acc_id);
         } else {
@@ -1255,7 +1255,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     
     // IMPORTANT: Pour BLF (Busy Lamp Field), utiliser subscribe_dlg_event
     // Non pas subscribe (qui est pour la presence classique)
-    buddy_cfg.subscribe = PJSIP_MODULE_PROC_CONTINUE;             // Désactiver la presence classique
+    buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     // Note: buddy_cb doesn't exist in pjsua_buddy_config - NOTIFY messages handled by notify_msg_callback module
     
