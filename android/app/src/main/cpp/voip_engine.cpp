@@ -386,8 +386,13 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     pjsip_msg *msg = rdata->msg_info.msg;
     
     // Only process NOTIFY requests
-    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_NOTIFY_METHOD) {
-        return PJ_FALSE;
+    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_SUBSCRIBE && msg->line.req.method.id != PJSIP_NOTIFY) {
+        // Check if it's a NOTIFY by comparing method name string
+        if (msg->type != PJSIP_REQUEST_MSG) return PJ_FALSE;
+        pj_str_t notify_method = {"NOTIFY", 6};
+        if (pj_strcmp(&msg->line.req.method.name, &notify_method) != 0) {
+            return PJ_FALSE;
+        }
     }
     
     LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
@@ -470,7 +475,8 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
             }
         } else {
             // Try adding sip: prefix
-            std::string contact_with_prefix = "sip:" + contact_uri;
+            std::string contact_with_prefix = "sip:";
+            contact_with_prefix += contact_uri;
             buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
         }
         
@@ -1227,9 +1233,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     // Non pas subscribe (qui est pour la presence classique)
     buddy_cfg.subscribe = PJ_FALSE;             // Désactiver la presence classique
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
-    
-    buddy_cfg.buddy_cb = &on_buddy_state;       // CRUCIAL: Enregistrer le callback pour être notifié des changements d'état
-    LOGI(">>> nativeSubscribePresence: buddy_cfg.buddy_cb set to on_buddy_state function pointer (%p)", (void*)&on_buddy_state);
+    // Note: buddy_cb doesn't exist in pjsua_buddy_config - NOTIFY messages handled by notify_msg_callback module
     
     buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
