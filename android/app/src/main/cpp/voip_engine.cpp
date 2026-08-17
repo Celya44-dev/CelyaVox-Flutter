@@ -377,60 +377,68 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 }
 
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
-// This callback is invoked for NOTIFY requests
-static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
-    LOGI(">>> notify_msg_callback: MESSAGE CALLBACK INVOKED (called for every SIP message)");
+// This callback is invoked for ALL SIP transactions including NOTIFY
+static pj_bool_t notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event) {
+    LOGI(">>> notify_tsx_callback: TRANSACTION CALLBACK INVOKED, event type=%d", event ? event->type : -1);
     
-    if (!rdata || !rdata->msg_info.msg) {
+    if (!tsx || !tsx->method.name.ptr) {
         return PJ_FALSE;
     }
     
-    pjsip_msg *msg = rdata->msg_info.msg;
-    LOGI(">>> notify_msg_callback: msg->type=%d (PJSIP_REQUEST_MSG=%d), method.name=%.*s", 
-         msg->type, PJSIP_REQUEST_MSG, (int)msg->line.req.method.name.slen, msg->line.req.method.name.ptr);
+    pj_str_t method = tsx->method.name;
+    LOGI(">>> notify_tsx_callback: Transaction method=%.*s, role=%d", (int)method.slen, method.ptr, tsx->role);
     
-    // Only process NOTIFY requests - compare method name string
-    if (msg->type != PJSIP_REQUEST_MSG) {
+    // Only process NOTIFY requests that we RECEIVE
+    if (tsx->method.name.slen != 6 || 
+        pj_strnicmp2(&tsx->method.name, "NOTIFY", 6) != 0) {
         return PJ_FALSE;
     }
     
-    // Compare with "NOTIFY" string
-    if (msg->line.req.method.name.slen != 6 || 
-        pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
+    if (tsx->role != PJSIP_ROLE_UAS) {
+        // We're only interested in NOTIFY messages we receive (UAS=User Agent Server)
         return PJ_FALSE;
     }
     
-    LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
+    LOGI(">>> notify_tsx_callback: ===== NOTIFY TRANSACTION RECEIVED =====");
     
-    // Get the message body
-    pjsip_msg_body *body = msg->body;
-    if (!body || !body->data) {
-        LOGW(">>> NOTIFY_HANDLER: NOTIFY has no message body");
+    // Get the received message from the transaction event
+    // For incoming NOTIFY, the message is in the received data
+    pjsip_msg *msg = NULL;
+    if (event->type == PJSIP_EVENT_RX_MSG) {
+        msg = event->body.rx_msg.rdata->msg_info.msg;
+        LOGI(">>> notify_tsx_callback: Got message from RX_MSG event");
+    } else {
+        LOGW(">>> notify_tsx_callback: Event type %d is not RX_MSG, skipping", event->type);
+        return PJ_FALSE;
+    }
+    
+    if (!msg || !msg->body || !msg->body->data) {
+        LOGW(">>> notify_tsx_callback: NOTIFY has no message body");
         return PJ_FALSE;
     }
     
     // Check if this is dialog-info+xml content type
-    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
-        LOGW(">>> NOTIFY_HANDLER: No content type specified");
+    if (!msg->body->content_type.type.ptr || !msg->body->content_type.subtype.ptr) {
+        LOGW(">>> notify_tsx_callback: No content type specified");
         return PJ_FALSE;
     }
     
-    pj_str_t type = body->content_type.type;
-    pj_str_t subtype = body->content_type.subtype;
+    pj_str_t type = msg->body->content_type.type;
+    pj_str_t subtype = msg->body->content_type.subtype;
     
     // Look for "application/dialog-info+xml"
     if (!(pj_stricmp2(&type, "application") == 0 && 
           (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
-        LOGI(">>> NOTIFY_HANDLER: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
+        LOGI(">>> notify_tsx_callback: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
              (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
         return PJ_FALSE;
     }
     
-    LOGI(">>> NOTIFY_HANDLER: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
+    LOGI(">>> notify_tsx_callback: Found dialog-info+xml body, length=%u bytes", (unsigned)msg->body->len);
     
     // Parse the XML body
-    const char *xml_body = (const char *)body->data;
-    int xml_len = body->len;
+    const char *xml_body = (const char *)msg->body->data;
+    int xml_len = msg->body->len;
     
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
@@ -538,11 +546,11 @@ static pjsip_module mod_notify_handler = {
     NULL,                          // start()
     NULL,                          // stop()
     NULL,                          // unload()
-    &notify_msg_callback,          // on_rx_request()
+    NULL,                          // on_rx_request() - NOT USED
     NULL,                          // on_rx_response()
     NULL,                          // on_tx_request()
     NULL,                          // on_tx_response()
-    NULL,                          // on_tsx_state()
+    &notify_tsx_state_callback,    // on_tsx_state() - Use this instead to capture NOTIFY
 };
 
 static void on_buddy_state(pjsua_buddy_id buddy_id) {
@@ -881,14 +889,23 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        // Use proxy as-is without forcing transport
-        // Let PJSIP negotiate transport naturally
+        // Force UDP transport in proxy to avoid "Unsupported transport" errors
         memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
-        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
-                 "%s", proxy);
+        std::string proxy_str(proxy);
+        
+        // Add ;transport=udp if not already present
+        if (proxy_str.find("transport=") == std::string::npos) {
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s;transport=udp", proxy);
+        } else {
+            // Already has transport specified - use as-is
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s", proxy);
+        }
+        
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy CONFIGURED: %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
     } else {
         acc_cfg.proxy_cnt = 0;
         LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
