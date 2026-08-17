@@ -385,14 +385,15 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
     
     pjsip_msg *msg = rdata->msg_info.msg;
     
-    // Only process NOTIFY requests
-    if (msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_SUBSCRIBE && msg->line.req.method.id != PJSIP_NOTIFY) {
-        // Check if it's a NOTIFY by comparing method name string
-        if (msg->type != PJSIP_REQUEST_MSG) return PJ_FALSE;
-        pj_str_t notify_method = {"NOTIFY", 6};
-        if (pj_strcmp(&msg->line.req.method.name, &notify_method) != 0) {
-            return PJ_FALSE;
-        }
+    // Only process NOTIFY requests - compare method name string
+    if (msg->type != PJSIP_REQUEST_MSG) {
+        return PJ_FALSE;
+    }
+    
+    // Compare with "NOTIFY" string
+    if (msg->line.req.method.name.slen != 6 || 
+        pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
+        return PJ_FALSE;
     }
     
     LOGI(">>> NOTIFY_HANDLER: ===== NOTIFY MESSAGE RECEIVED =====");
@@ -525,10 +526,10 @@ static pj_bool_t notify_msg_callback(pjsip_rx_data *rdata) {
 
 // PJSIP module definition for NOTIFY interception
 static pjsip_module mod_notify_handler = {
-    NULL, NULL,                    // prev, next
-    { "mod-notify-handler", 18 },  // name
-    -1,                            // priority
-    PJSIP_MOD_PRIORITY_APPLICATION, // priority
+    NULL, NULL,                              // prev, next
+    { (char*)"mod-notify-handler", 18 },    // name - cast string literal to char*
+    -1,                                      // priority
+    PJSIP_MOD_PRIORITY_APPLICATION,         // priority
     NULL,                          // load()
     NULL,                          // start()
     NULL,                          // stop()
