@@ -401,13 +401,13 @@ class _DialpadPageState extends State<DialpadPage> {
         setState(() => _isCalling = false);
         return;
       }
-      final callId = await widget.engine.makeCall(callee);
+      await widget.engine.makeCall(callee);
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => InCallPage(
             engine: widget.engine,
-            callId: callId,  // Use the callId returned by native code
+            callId: '0',  // Placeholder, will be updated by OutgoingCallEvent
             callerId: callee,  // Display the dialed number
           ),
         ),

@@ -98,7 +98,7 @@ class VoipEngine(
         sipEngine.unregister()
     }
 
-    fun startCall(callee: String): Int {
+    fun startCall(callee: String): Boolean {
         Log.i(TAG, "VoipEngine.startCall callee=$callee")
         // Initialize audio for outgoing calls (similar to incoming calls in VoipConnection.startAudio())
         initCallAudio()

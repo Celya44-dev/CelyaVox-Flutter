@@ -28,6 +28,7 @@ static std::string g_account_password = "";  // Password du compte SIP (pour aut
 // Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
 static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
+static char g_global_cred_realm_empty[2] = "";  // Empty realm = catch-all for any unknown realm
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
 static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
@@ -736,6 +737,8 @@ static bool ensure_endpoint() {
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_fr_celya_celyavox_PjsipEngine_nativeInit(JNIEnv *env, jobject obj) {
+    __android_log_write(ANDROID_LOG_INFO, "PjsipNative", ">>> nativeInit: FUNCTION CALLED");
+    LOGI(">>> nativeInit: FUNCTION CALLED - starting PJSIP initialization");
     ensure_pj_thread_registered("jni");
     if (!g_vm) {
         env->GetJavaVM(&g_vm);
@@ -847,7 +850,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: Account URIs (in static buffers for persistence):");
     LOGI("    - id=%s", g_global_acc_id);
     LOGI("    - reg_uri=%s", g_global_acc_reg_uri);
-    acc_cfg.cred_count = 2;
+    acc_cfg.cred_count = 3;
     
     // Credential 1: realm="asterisk" (pour FreePBX/Asterisk)
     // IMPORTANT: Use static buffers (g_global_cred_*) not JNI strings!
@@ -873,16 +876,37 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: Credential[1] (realm=wildcard, algo=MD5):");
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
+    
+    // Credential 3: realm="" (empty = catch-all for ANY realm not matched by above)
+    // CRITICAL FIX FOR 401: PJSIP 2.17 needs empty realm as fallback for unknown realms
+    acc_cfg.cred_info[2].realm = pj_str_t{g_global_cred_realm_empty, 0};  // Empty realm
+    acc_cfg.cred_info[2].scheme = pj_str_t{const_cast<char *>("digest"), 6};
+    acc_cfg.cred_info[2].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
+    acc_cfg.cred_info[2].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
+    acc_cfg.cred_info[2].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
+    acc_cfg.cred_info[2].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
+    
+    LOGI(">>> nativeRegister: Credential[2] (realm=EMPTY/catch-all, algo=MD5):");
+    LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[2].username.ptr, acc_cfg.cred_info[2].username.ptr);
+    LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[2].data.ptr, acc_cfg.cred_info[2].data.slen);
 
     if (proxy && std::string(proxy).length() > 0) {
-        // Use proxy as-is without forcing transport
-        // Let PJSIP negotiate transport naturally
+        // Force port 5060 for UDP SIP
         memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
-        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
-                 "%s", proxy);
+        // Check if proxy already has a port
+        std::string proxy_str(proxy);
+        if (proxy_str.find(':') == std::string::npos) {
+            // No port specified - add :5060
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
+                     "sip:%s:5060", proxy);
+        } else {
+            // Port already specified - use as-is
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1, 
+                     "%s", proxy);
+        }
         acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
         acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy CONFIGURED: %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: Proxy CONFIGURED (port 5060 forced): %s", g_global_proxy_with_transport);
     } else {
         acc_cfg.proxy_cnt = 0;
         LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
@@ -972,11 +996,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     
-    // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
+    // Use static buffer for call destination with port 5060 (CRITICAL: PJSIP needs it to persist during auth retry)
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060", number);
     
-    LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: Destination=%s (port 5060 forced)", g_global_call_dest_uri);
     
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
