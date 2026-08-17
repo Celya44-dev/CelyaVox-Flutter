@@ -377,6 +377,105 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
     }
 }
 
+// Callback PJSUA natif pour traiter les NOTIFY de subscription (le bon callback!)
+static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type, 
+                         pjsip_rx_data *rdata) {
+    LOGI(">>> on_rx_notify: NOTIFY RECEIVED for buddy_id=%d, from=%s, type=%d", buddy_id, from, type);
+    
+    if (!rdata || !rdata->msg_info.msg) {
+        LOGW(">>> on_rx_notify: No message in rdata");
+        return;
+    }
+    
+    pjsip_msg *msg = rdata->msg_info.msg;
+    pjsip_msg_body *body = msg->body;
+    
+    if (!body || !body->data) {
+        LOGW(">>> on_rx_notify: NOTIFY has no message body");
+        return;
+    }
+    
+    // Check if this is dialog-info+xml
+    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
+        LOGW(">>> on_rx_notify: No content type");
+        return;
+    }
+    
+    pj_str_t type_str = body->content_type.type;
+    pj_str_t subtype_str = body->content_type.subtype;
+    
+    if (!(pj_stricmp2(&type_str, "application") == 0 && 
+          (pj_stricmp2(&subtype_str, "dialog-info+xml") == 0 || pj_stricmp2(&subtype_str, "dialog-info") == 0))) {
+        LOGI(">>> on_rx_notify: Content-Type is %.*s/%.*s (not dialog-info+xml)", 
+             (int)type_str.slen, type_str.ptr, (int)subtype_str.slen, subtype_str.ptr);
+        return;
+    }
+    
+    LOGI(">>> on_rx_notify: Found dialog-info+xml, buddy_id=%d, body_len=%u", buddy_id, (unsigned)body->len);
+    
+    // Parse XML body
+    const char *xml_body = (const char *)body->data;
+    int xml_len = body->len;
+    
+    const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
+    if (!presence_state) {
+        LOGW(">>> on_rx_notify: Failed to parse dialog state");
+        return;
+    }
+    
+    // Extract contact URI from XML
+    const char *uri_start = strstr(xml_body, "uri=\"");
+    if (!uri_start) {
+        LOGW(">>> on_rx_notify: No uri attribute in XML");
+        return;
+    }
+    
+    uri_start += 5;
+    const char *uri_end = strchr(uri_start, '"');
+    if (!uri_end) {
+        LOGW(">>> on_rx_notify: No closing quote for uri");
+        return;
+    }
+    
+    int uri_len = uri_end - uri_start;
+    if (uri_len >= 256) {
+        LOGW(">>> on_rx_notify: URI too long");
+        return;
+    }
+    
+    static char contact_uri[256];
+    strncpy(contact_uri, uri_start, uri_len);
+    contact_uri[uri_len] = '\0';
+    
+    LOGI(">>> on_rx_notify: Parsed state='%s' for contact='%s'", presence_state, contact_uri);
+    
+    // Store in map
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_buddy_last_dialog_state[buddy_id] = presence_state;
+    
+    // Emit to Dart
+    std::string event_data = contact_uri;
+    event_data += ":";
+    event_data += presence_state;
+    
+    LOGI(">>> on_rx_notify: Emitting presence_updated: %s", event_data.c_str());
+    
+    JNIEnv *env = nullptr;
+    if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
+        jmethodID mid = env->GetMethodID(g_engineClass, "notifyPresenceUpdated", "(Ljava/lang/String;)V");
+        if (mid) {
+            jstring java_event = env->NewStringUTF(event_data.c_str());
+            env->CallVoidMethod(g_engine_instance, mid, java_event);
+            env->DeleteLocalRef(java_event);
+            LOGI(">>> on_rx_notify: Event sent to Dart successfully");
+        } else {
+            LOGW(">>> on_rx_notify: notifyPresenceUpdated method not found");
+        }
+    } else {
+        LOGW(">>> on_rx_notify: Cannot attach JNI");
+    }
+}
+
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for ALL received SIP requests
 static pj_bool_t notify_rx_request_callback(pjsip_rx_data *rdata) {
@@ -661,6 +760,7 @@ static bool ensure_endpoint() {
     ua_cfg.cb.on_call_media_state = &on_call_media_state;
     ua_cfg.cb.on_reg_state = &on_reg_state;
     ua_cfg.cb.on_buddy_state = &on_buddy_state;  // Callback PJSIP natif pour présence
+    ua_cfg.cb.on_rx_notify = &on_rx_notify;      // Callback for NOTIFY messages with dialog-info+xml
     static const pj_str_t kUserAgent = pj_str(const_cast<char *>("CelyaVox Mobile"));
     ua_cfg.user_agent = kUserAgent;
 
