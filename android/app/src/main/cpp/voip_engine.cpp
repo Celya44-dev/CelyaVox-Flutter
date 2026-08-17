@@ -997,14 +997,27 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     // IMPORTANT: Include domain for proper credential matching during 401 auth retry
     // REGISTER uses "sip:domain", SUBSCRIBE uses "sip:contact@domain", so INVITE should use "sip:number@domain"
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    if (g_account_domain.empty()) {
-        // Fallback to number-only if domain not available (shouldn't happen)
+    
+    // FIX: Check if number already has @domain (Dart may have added it)
+    if (strchr(number, '@') != nullptr) {
+        // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
+        if (strncmp(number, "sip:", 4) == 0) {
+            // Already has sip: prefix
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s", number);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, using as-is");
+        } else {
+            // Has @domain but missing sip: prefix
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix only");
+        }
+    } else if (g_account_domain.empty()) {
+        // Number has no @domain and domain not available (shouldn't happen)
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Include domain for credential realm matching (same pattern as SUBSCRIBE)
+        // Number has no @domain, add it for credential realm matching
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Destination includes domain for credential realm matching");
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain for credential realm matching");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
