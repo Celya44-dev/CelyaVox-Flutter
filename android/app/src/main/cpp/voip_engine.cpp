@@ -894,9 +894,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
-    // CRITICAL: Always configure an OUTBOUND proxy to force all requests through UDP
+    // CRITICAL: Always configure a PROXY with UDP transport forced
     // This prevents DNS SRV lookups that return TCP (which we don't support)
-    // Outbound proxy is used for ALL outgoing requests including INVITE
+    // Proxy forces PJSIP to route all SIP requests to this server
     memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
     
     if (proxy && std::string(proxy).length() > 0) {
@@ -910,18 +910,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
                      "%s", proxy);
         }
     } else {
-        // NO PROXY PROVIDED: Use domain as outbound proxy with UDP transport forced
+        // NO PROXY PROVIDED: Use domain as proxy with UDP transport forced
         // This forces PJSIP to route via UDP and ignore server-suggested TCP
         snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
                  "sip:%s;transport=udp", domain);
-        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as outbound proxy: %s", g_global_proxy_with_transport);
+        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as proxy: %s", g_global_proxy_with_transport);
     }
     
-    // Use OUTBOUND proxy (not regular proxy) to force ALL SIP requests through UDP
-    // This bypasses DNS SRV lookups that return TCP
-    acc_cfg.outbound_proxy_cnt = 1;
-    acc_cfg.outbound_proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
-    LOGI(">>> nativeRegister: OUTBOUND PROXY CONFIGURED with UDP transport forced: %s (forces all requests through UDP)", g_global_proxy_with_transport);
+    // Use PROXY (not outbound_proxy - that doesn't exist in PJSIP 2.17)
+    acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
+    acc_cfg.proxy_cnt = 1;
+    LOGI(">>> nativeRegister: PROXY CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
@@ -963,9 +962,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - account ID: %d", g_acc_id);
     LOGI("    - status text: %s", acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
     LOGI("    - has credentials (cred_count from cfg): 2");
-    LOGI("    - outbound_proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.outbound_proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
+    LOGI("    - proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
-    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via outbound proxy with UDP");
+    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via proxy with UDP");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
@@ -1006,8 +1005,18 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     const char *number = env->GetStringUTFChars(jnumber, nullptr);
     
     // Use static buffer for call destination (CRITICAL: PJSIP needs it to persist during auth retry)
+    // IMPORTANT: Include domain for proper credential matching during 401 auth retry
+    // REGISTER uses "sip:domain", SUBSCRIBE uses "sip:contact@domain", so INVITE should use "sip:number@domain"
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
-    snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+    if (g_account_domain.empty()) {
+        // Fallback to number-only if domain not available (shouldn't happen)
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+        LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
+    } else {
+        // Include domain for credential realm matching (same pattern as SUBSCRIBE)
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Destination includes domain for credential realm matching");
+    }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
     
@@ -1031,6 +1040,12 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
+    
+    // PJSIP will now use account g_acc_id credentials (use_shared_auth=PJ_TRUE) because:
+    // 1. Destination now includes domain: "sip:105@domain" (same pattern as SUBSCRIBE)
+    // 2. Account has use_shared_auth=PJ_TRUE (like REGISTER/SUBSCRIBE)
+    // 3. When 401 Unauthorized arrives, PJSIP will match realm and retry with Digest auth
+    LOGI(">>> nativeMakeCall: INVITE will use account %d credentials for 401 auth retry (credential realm matching enabled)", g_acc_id);
     
     pjsua_call_id call_id = PJSUA_INVALID_ID;
     pj_status_t status = pjsua_call_make_call(g_acc_id, &dst, 0, nullptr, nullptr, &call_id);
