@@ -28,6 +28,7 @@ static std::string g_account_password = "";  // Password du compte SIP (pour aut
 // Buffers statiques pour les credentials globaux (pour éviter que les pj_str_t pointent vers des buffers temporaires)
 static char g_global_cred_realm_asterisk[32] = "asterisk";
 static char g_global_cred_realm_wildcard[8] = "*";
+static char g_global_cred_realm_empty[2] = "";  // Empty realm = catch-all for any unknown realm
 static char g_global_cred_username[128] = "";
 static char g_global_cred_password[128] = "";
 static char g_global_proxy_with_transport[256] = "";  // Proxy URI with ;transport=udp suffix
