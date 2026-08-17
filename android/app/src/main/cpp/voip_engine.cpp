@@ -888,28 +888,31 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
+    // CRITICAL: Always configure an outbound proxy with UDP transport
+    // This prevents "Unsupported transport" errors when server suggests TCP
+    memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
+    
     if (proxy && std::string(proxy).length() > 0) {
-        // Force UDP transport in proxy to avoid "Unsupported transport" errors
-        memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
+        // Use provided proxy with UDP transport forced
         std::string proxy_str(proxy);
-        
-        // Add ;transport=udp if not already present
         if (proxy_str.find("transport=") == std::string::npos) {
             snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
                      "%s;transport=udp", proxy);
         } else {
-            // Already has transport specified - use as-is
             snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
                      "%s", proxy);
         }
-        
-        acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
-        acc_cfg.proxy_cnt = 1;
-        LOGI(">>> nativeRegister: Proxy CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
     } else {
-        acc_cfg.proxy_cnt = 0;
-        LOGW(">>> nativeRegister: WARNING - NO PROXY CONFIGURED! (proxy=%s, will use direct routing to domain)", proxy ? proxy : "NULL");
+        // NO PROXY PROVIDED: Use domain as outbound proxy with UDP transport forced
+        // This forces PJSIP to route via UDP and ignore server-suggested TCP
+        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                 "sip:%s;transport=udp", domain);
+        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as outbound proxy: %s", g_global_proxy_with_transport);
     }
+    
+    acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
+    acc_cfg.proxy_cnt = 1;
+    LOGI(">>> nativeRegister: Proxy CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
