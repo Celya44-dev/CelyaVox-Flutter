@@ -380,14 +380,18 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 // PJSIP Module to intercept NOTIFY messages for dialog-info parsing
 // This callback is invoked for ALL SIP transactions including NOTIFY
 static void notify_tsx_state_callback(pjsip_transaction *tsx, pjsip_event *event) {
-    LOGI(">>> notify_tsx_callback: TRANSACTION CALLBACK INVOKED, event type=%d", event ? event->type : -1);
+    static int call_count = 0;
+    call_count++;
+    LOGI(">>> notify_tsx_callback: INVOKED COUNT #%d, tsx=%p, event=%p, event_type=%d", 
+         call_count, (void*)tsx, (void*)event, event ? event->type : -1);
     
     if (!tsx || !tsx->method.name.ptr) {
         return;
     }
     
     pj_str_t method = tsx->method.name;
-    LOGI(">>> notify_tsx_callback: Transaction method=%.*s, role=%d", (int)method.slen, method.ptr, tsx->role);
+    LOGI(">>> notify_tsx_callback: method=%.*s, role=%d, state=%d", 
+         (int)method.slen, method.ptr, tsx->role, tsx->state);
     
     // Only process NOTIFY requests that we RECEIVE
     if (tsx->method.name.slen != 6 || 
@@ -724,7 +728,7 @@ static bool ensure_endpoint() {
         pjsua_destroy();
         return false;
     }
-    LOGI(">>> pjsua_init: UDP transport created with ID=%d (will force all accounts to use UDP)", g_transport_id);
+    LOGI(">>> pjsua_init: UDP transport created with ID=%d", g_transport_id);
 
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
@@ -890,26 +894,40 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
     LOGI("    - password ptr=%p, slen=%ld", acc_cfg.cred_info[1].data.ptr, acc_cfg.cred_info[1].data.slen);
 
-    // CRITICAL: Force UDP transport at account level (not via proxy URI)
-    // Using both proxy URI transport AND account transport_id causes PJSIP_ETPNOTSUITABLE error
-    // Solution: Use ONLY the account transport_id (set below), skip proxy URI configuration
-    acc_cfg.proxy_cnt = 0;
-    LOGI(">>> nativeRegister: NO PROXY CONFIGURED - UDP transport will be forced by account transport_id=%d", g_transport_id);
+    // CRITICAL: Always configure an OUTBOUND proxy to force all requests through UDP
+    // This prevents DNS SRV lookups that return TCP (which we don't support)
+    // Outbound proxy is used for ALL outgoing requests including INVITE
+    memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
+    
+    if (proxy && std::string(proxy).length() > 0) {
+        // Use provided proxy with UDP transport forced
+        std::string proxy_str(proxy);
+        if (proxy_str.find("transport=") == std::string::npos) {
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s;transport=udp", proxy);
+        } else {
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s", proxy);
+        }
+    } else {
+        // NO PROXY PROVIDED: Use domain as outbound proxy with UDP transport forced
+        // This forces PJSIP to route via UDP and ignore server-suggested TCP
+        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                 "sip:%s;transport=udp", domain);
+        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as outbound proxy: %s", g_global_proxy_with_transport);
+    }
+    
+    // Use OUTBOUND proxy (not regular proxy) to force ALL SIP requests through UDP
+    // This bypasses DNS SRV lookups that return TCP
+    acc_cfg.outbound_proxy_cnt = 1;
+    acc_cfg.outbound_proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
+    LOGI(">>> nativeRegister: OUTBOUND PROXY CONFIGURED with UDP transport forced: %s (forces all requests through UDP)", g_global_proxy_with_transport);
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
     // Ensures Digest auth retry works for all modules using account credentials
     acc_cfg.use_shared_auth = PJ_TRUE;
     LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
-
-    // CRITICAL: Force account to use UDP transport only to prevent "Unsupported transport" errors
-    // This overrides any server-suggested TCP and forces UDP outbound for all SIP requests
-    if (g_transport_id != PJSUA_INVALID_ID) {
-        acc_cfg.transport_id = g_transport_id;
-        LOGI(">>> nativeRegister: FORCE transport_id=%d (UDP only - no TCP fallback)", g_transport_id);
-    } else {
-        LOGW(">>> nativeRegister: WARNING - g_transport_id not set, may allow TCP fallback!");
-    }
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -945,11 +963,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - account ID: %d", g_acc_id);
     LOGI("    - status text: %s", acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
     LOGI("    - has credentials (cred_count from cfg): 2");
-    LOGI("    - proxy[0] with transport=udp: %s", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
-    LOGI("    - allow_contact_rewrite: 0 (disabled, force UDP routing)");
-    LOGI("    - allow_via_rewrite: 0 (disabled, force UDP routing)");
+    LOGI("    - outbound_proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.outbound_proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
-    LOGI(">>> nativeRegister: When INVITE 401 is received, retry should use proxy UDP routing (not server Contact)");
+    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via outbound proxy with UDP");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
