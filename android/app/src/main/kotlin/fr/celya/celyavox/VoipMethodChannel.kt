@@ -79,7 +79,7 @@ class VoipMethodChannel(
                     val callee = requireArgument<String>(call, "callee")
                     val callId = engine.startCall(callee)
                     if (callId < 0) {
-                        result.error("CALL", "Native makeCall failed", null)
+                        result.error("CALL", "Native makeCall failed (callId=$callId)", null)
                         return
                     }
                     result.success(callId)
