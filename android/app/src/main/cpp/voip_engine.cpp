@@ -377,13 +377,13 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
     }
 }
 
-// Callback PJSUA natif pour traiter les NOTIFY de subscription (le bon callback!)
-static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type, 
-                         pjsip_rx_data *rdata) {
-    LOGI(">>> on_rx_notify: NOTIFY RECEIVED for buddy_id=%d, from=%s, type=%d", buddy_id, from, type);
+// Callback for buddy dialog event (dialog-info+xml events from NOTIFY)
+static void on_buddy_dlg_event_state(pjsua_buddy_id buddy_id, const char *dlg_event, 
+                                      pjsip_rx_data *rdata) {
+    LOGI(">>> on_buddy_dlg_event_state: DIALOG EVENT buddy_id=%d, event=%s", buddy_id, dlg_event);
     
     if (!rdata || !rdata->msg_info.msg) {
-        LOGW(">>> on_rx_notify: No message in rdata");
+        LOGW(">>> on_buddy_dlg_event_state: No message data");
         return;
     }
     
@@ -391,55 +391,39 @@ static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type,
     pjsip_msg_body *body = msg->body;
     
     if (!body || !body->data) {
-        LOGW(">>> on_rx_notify: NOTIFY has no message body");
+        LOGW(">>> on_buddy_dlg_event_state: No message body");
         return;
     }
     
-    // Check if this is dialog-info+xml
-    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
-        LOGW(">>> on_rx_notify: No content type");
-        return;
-    }
-    
-    pj_str_t type_str = body->content_type.type;
-    pj_str_t subtype_str = body->content_type.subtype;
-    
-    if (!(pj_stricmp2(&type_str, "application") == 0 && 
-          (pj_stricmp2(&subtype_str, "dialog-info+xml") == 0 || pj_stricmp2(&subtype_str, "dialog-info") == 0))) {
-        LOGI(">>> on_rx_notify: Content-Type is %.*s/%.*s (not dialog-info+xml)", 
-             (int)type_str.slen, type_str.ptr, (int)subtype_str.slen, subtype_str.ptr);
-        return;
-    }
-    
-    LOGI(">>> on_rx_notify: Found dialog-info+xml, buddy_id=%d, body_len=%u", buddy_id, (unsigned)body->len);
-    
-    // Parse XML body
+    // Parse the XML body
     const char *xml_body = (const char *)body->data;
     int xml_len = body->len;
     
+    LOGI(">>> on_buddy_dlg_event_state: Parsing XML body, length=%u", (unsigned)xml_len);
+    
     const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
     if (!presence_state) {
-        LOGW(">>> on_rx_notify: Failed to parse dialog state");
+        LOGW(">>> on_buddy_dlg_event_state: Failed to parse dialog state");
         return;
     }
     
     // Extract contact URI from XML
     const char *uri_start = strstr(xml_body, "uri=\"");
     if (!uri_start) {
-        LOGW(">>> on_rx_notify: No uri attribute in XML");
+        LOGW(">>> on_buddy_dlg_event_state: No uri attribute in XML");
         return;
     }
     
     uri_start += 5;
     const char *uri_end = strchr(uri_start, '"');
     if (!uri_end) {
-        LOGW(">>> on_rx_notify: No closing quote for uri");
+        LOGW(">>> on_buddy_dlg_event_state: No closing quote for uri");
         return;
     }
     
     int uri_len = uri_end - uri_start;
     if (uri_len >= 256) {
-        LOGW(">>> on_rx_notify: URI too long");
+        LOGW(">>> on_buddy_dlg_event_state: URI too long");
         return;
     }
     
@@ -447,9 +431,9 @@ static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type,
     strncpy(contact_uri, uri_start, uri_len);
     contact_uri[uri_len] = '\0';
     
-    LOGI(">>> on_rx_notify: Parsed state='%s' for contact='%s'", presence_state, contact_uri);
+    LOGI(">>> on_buddy_dlg_event_state: Parsed state='%s' for contact='%s'", presence_state, contact_uri);
     
-    // Store in map
+    // Store in map for later use
     std::lock_guard<std::mutex> lock(g_mutex);
     g_buddy_last_dialog_state[buddy_id] = presence_state;
     
@@ -458,7 +442,7 @@ static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type,
     event_data += ":";
     event_data += presence_state;
     
-    LOGI(">>> on_rx_notify: Emitting presence_updated: %s", event_data.c_str());
+    LOGI(">>> on_buddy_dlg_event_state: Emitting presence_updated: %s", event_data.c_str());
     
     JNIEnv *env = nullptr;
     if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
@@ -467,169 +451,16 @@ static void on_rx_notify(pjsua_buddy_id buddy_id, const char *from, int type,
             jstring java_event = env->NewStringUTF(event_data.c_str());
             env->CallVoidMethod(g_engine_instance, mid, java_event);
             env->DeleteLocalRef(java_event);
-            LOGI(">>> on_rx_notify: Event sent to Dart successfully");
+            LOGI(">>> on_buddy_dlg_event_state: Event sent to Dart successfully");
         } else {
-            LOGW(">>> on_rx_notify: notifyPresenceUpdated method not found");
+            LOGW(">>> on_buddy_dlg_event_state: notifyPresenceUpdated method not found");
         }
     } else {
-        LOGW(">>> on_rx_notify: Cannot attach JNI");
+        LOGW(">>> on_buddy_dlg_event_state: Cannot attach JNI");
     }
 }
 
-// PJSIP Module to intercept NOTIFY messages for dialog-info parsing
-// This callback is invoked for ALL received SIP requests
-static pj_bool_t notify_rx_request_callback(pjsip_rx_data *rdata) {
-    static int msg_count = 0;
-    msg_count++;
-    
-    if (!rdata || !rdata->msg_info.msg) {
-        return PJ_FALSE;
-    }
-    
-    pjsip_msg *msg = rdata->msg_info.msg;
-    if (msg->type != PJSIP_REQUEST_MSG) {
-        return PJ_FALSE;
-    }
-    
-    // Log EVERY request to see what arrives
-    LOGI(">>> notify_rx_request: REQUEST #%d: method=%.*s", 
-         msg_count, (int)msg->line.req.method.name.slen, msg->line.req.method.name.ptr);
-    
-    // Only process NOTIFY requests
-    if (msg->line.req.method.name.slen != 6 || 
-        pj_strnicmp2(&msg->line.req.method.name, "NOTIFY", 6) != 0) {
-        return PJ_FALSE;
-    }
-    
-    LOGI(">>> notify_rx_request: ===== NOTIFY REQUEST #%d RECEIVED =====", msg_count);
-    
-    // We already have rdata->msg_info.msg above, use it directly
-    pjsip_msg_body *body = msg->body;
-    if (!body || !body->data) {
-        LOGW(">>> notify_rx_request: NOTIFY has no message body");
-        return PJ_FALSE;
-    }
-    
-    // Check if this is dialog-info+xml content type
-    if (!body->content_type.type.ptr || !body->content_type.subtype.ptr) {
-        LOGW(">>> notify_rx_request: No content type specified");
-        return PJ_FALSE;
-    }
-    
-    pj_str_t type = body->content_type.type;
-    pj_str_t subtype = body->content_type.subtype;
-    
-    // Look for "application/dialog-info+xml"
-    if (!(pj_stricmp2(&type, "application") == 0 && 
-          (pj_stricmp2(&subtype, "dialog-info+xml") == 0 || pj_stricmp2(&subtype, "dialog-info") == 0))) {
-        LOGI(">>> notify_rx_request: Content-Type is %.*s/%.*s (not dialog-info+xml), skipping", 
-             (int)type.slen, type.ptr, (int)subtype.slen, subtype.ptr);
-        return PJ_FALSE;
-    }
-    
-    LOGI(">>> notify_rx_request: Found dialog-info+xml body, length=%u bytes", (unsigned)body->len);
-    
-    // Parse the XML body
-    const char *xml_body = (const char *)body->data;
-    int xml_len = body->len;
-    
-    const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
-    if (!presence_state) {
-        LOGW(">>> notify_rx_request: Failed to parse presence state from XML");
-        return PJ_FALSE;
-    }
-    
-    // Try to extract the "uri" attribute from the first <dialog> tag to identify the buddy
-    const char *uri_start = strstr(xml_body, "uri=\"");
-    if (!uri_start) {
-        LOGW(">>> notify_rx_request: No uri= attribute found in XML dialog");
-        return PJ_FALSE;
-    }
-    
-    uri_start += 5;  // Skip "uri=\""
-    const char *uri_end = strchr(uri_start, '"');
-    if (!uri_end) {
-        LOGW(">>> notify_rx_request: No closing quote for uri= attribute");
-        return PJ_FALSE;
-    }
-    
-    // Extract contact URI (sip:username@domain)
-    int uri_len = uri_end - uri_start;
-    static char contact_uri[256];
-    if (uri_len >= 256) {
-        LOGW(">>> notify_rx_request: Contact URI too long: %d", uri_len);
-        return PJ_FALSE;
-    }
-    strncpy(contact_uri, uri_start, uri_len);
-    contact_uri[uri_len] = '\0';
-    
-    LOGI(">>> notify_rx_request: Extracted contact from XML: %s", contact_uri);
-    
-    // Look up the buddy_id from our subscription map
-    std::lock_guard<std::mutex> lock(g_mutex);
-    auto buddy_it = g_buddy_subscriptions.find(contact_uri);
-    if (buddy_it == g_buddy_subscriptions.end()) {
-        // Try without the sip: prefix (some NOTIFY might strip it)
-        std::string contact_without_prefix = contact_uri;
-        if (contact_without_prefix.substr(0, 4) == "sip:") {
-            contact_without_prefix = contact_without_prefix.substr(4);
-            buddy_it = g_buddy_subscriptions.find(contact_without_prefix);
-            if (buddy_it == g_buddy_subscriptions.end()) {
-                // Also try with sip: prefix added back
-                std::string contact_with_prefix = "sip:" + contact_without_prefix;
-                buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
-            }
-        } else {
-            // Try adding sip: prefix
-            std::string contact_with_prefix = "sip:";
-            contact_with_prefix += contact_uri;
-            buddy_it = g_buddy_subscriptions.find(contact_with_prefix);
-        }
-        
-        if (buddy_it == g_buddy_subscriptions.end()) {
-            LOGW(">>> notify_rx_request: Contact %s not found in subscription map", contact_uri);
-            LOGW(">>> notify_rx_request: Active subscriptions:");
-            for (const auto &sub : g_buddy_subscriptions) {
-                LOGW(">>>   - %s -> buddy_id %d", sub.first.c_str(), sub.second);
-            }
-            return PJ_FALSE;
-        }
-    }
-    
-    pjsua_buddy_id buddy_id = buddy_it->second;
-    LOGI(">>> notify_rx_request: Found buddy_id=%d for contact=%s", buddy_id, contact_uri);
-    
-    // Store the parsed presence state for this buddy
-    g_buddy_last_dialog_state[buddy_id] = presence_state;
-    LOGI(">>> notify_rx_request: Updated buddy %d dialog state to '%s'", buddy_id, presence_state);
-    
-    // Emit presence_updated event to Dart
-    std::string event_data = contact_uri;
-    event_data += ":";
-    event_data += presence_state;
-    
-    LOGI(">>> notify_rx_request: Emitting presence_updated event: %s", event_data.c_str());
-    
-    JNIEnv *env = nullptr;
-    if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
-        jmethodID mid = env->GetMethodID(g_engineClass, "notifyPresenceUpdated", "(Ljava/lang/String;)V");
-        if (mid) {
-            jstring java_event = env->NewStringUTF(event_data.c_str());
-            env->CallVoidMethod(g_engine_instance, mid, java_event);
-            LOGI(">>> notify_rx_request: Presence updated event sent to Java");
-            env->DeleteLocalRef(java_event);
-        } else {
-            LOGW(">>> notify_rx_request: notifyPresenceUpdated method not found");
-        }
-    } else {
-        LOGW(">>> notify_rx_request: Cannot call Java (g_vm=%p, g_engineClass=%p, g_engine_instance=%p)", 
-             (void*)g_vm, (void*)g_engineClass, (void*)g_engine_instance);
-    }
-    
-    return PJ_FALSE;  // Don't stop processing
-}
-
-// PJSIP module definition for NOTIFY interception
+// PJSIP module definition for NOTIFY interception (kept but not used - on_buddy_dlg_event_state is primary)
 static pjsip_module mod_notify_handler = {
     NULL, NULL,                              // prev, next
     { (char*)"mod-notify-handler", 18 },    // name
@@ -760,7 +591,7 @@ static bool ensure_endpoint() {
     ua_cfg.cb.on_call_media_state = &on_call_media_state;
     ua_cfg.cb.on_reg_state = &on_reg_state;
     ua_cfg.cb.on_buddy_state = &on_buddy_state;  // Callback PJSIP natif pour présence
-    ua_cfg.cb.on_rx_notify = &on_rx_notify;      // Callback for NOTIFY messages with dialog-info+xml
+    ua_cfg.cb.on_buddy_dlg_event_state = &on_buddy_dlg_event_state;  // Callback for dialog-info+xml events
     static const pj_str_t kUserAgent = pj_str(const_cast<char *>("CelyaVox Mobile"));
     ua_cfg.user_agent = kUserAgent;
 
