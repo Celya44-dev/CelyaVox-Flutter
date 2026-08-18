@@ -733,16 +733,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
-    // FIX: Force ;transport=udp on account URIs. Leaving PJSIP to "negotiate"
-    // triggers RFC3263 NAPTR/SRV DNS resolution, which can return TCP/TLS
-    // candidates. Since only a UDP transport is created (pjsua_transport_create
-    // with PJSIP_TRANSPORT_UDP), any non-UDP candidate fails with
-    // PJSIP_EUNSUPTRANSPORT ("Unsupported transport"). Explicit ;transport=udp
-    // bypasses NAPTR/SRV entirely and forces UDP.
+    // Force port 5060 and UDP transport to prevent DNS SRV lookups that return TCP
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s;transport=udp", user, domain);
+             "sip:%s@%s:5060;transport=udp", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s;transport=udp", domain);
+             "sip:%s:5060;transport=udp", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -782,13 +777,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.proxy_cnt = 0;
     LOGI(">>> nativeRegister: NO PROXY - Direct routing to domain");
 
-    // NOTE: acc_cfg.disable_srv does NOT exist in pjsua_acc_config (verified
-    // against pjproject headers) - it had no effect and DNS SRV lookups were
-    // never actually disabled. The real fix is the explicit ;transport=udp
-    // added above to g_global_acc_id / g_global_acc_reg_uri, which forces
-    // UDP and skips NAPTR/SRV resolution altogether (per RFC3263 handling
-    // in PJSIP's sip_resolve).
-    LOGI(">>> nativeRegister: Account/reg URIs use explicit ;transport=udp (forces direct UDP routing)");
+    // CRITICAL: Disable DNS SRV lookups (they return TCP which we don't support)
+    // Without this, PJSIP resolves the domain and gets TCP as preferred transport
+    acc_cfg.disable_srv = PJ_TRUE;
+    LOGI(">>> nativeRegister: Disabled DNS SRV lookups (forces direct UDP routing)");
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
@@ -878,41 +870,25 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     memset(g_global_call_dest_uri, 0, sizeof(g_global_call_dest_uri));
     
     // FIX: Check if number already has @domain (Dart may have added it)
-    // FIX: Force ;transport=udp on the destination URI. Without it, PJSIP's
-    // RFC3263 target resolution can perform NAPTR/SRV DNS lookups on the
-    // domain and select a TCP/TLS candidate. Since only a UDP transport was
-    // created at init (pjsua_transport_create/PJSIP_TRANSPORT_UDP), that
-    // candidate then fails with PJSIP_EUNSUPTRANSPORT ("Unsupported
-    // transport"), which is exactly the "will try next server" error seen
-    // in the logs. Explicit ;transport=udp bypasses NAPTR/SRV and forces UDP.
-    bool has_transport_param = (strstr(number, ";transport=") != nullptr);
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix
-            if (has_transport_param) {
-                snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s", number);
-            } else {
-                snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s;transport=udp", number);
-            }
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, using as-is (+transport=udp)");
+            // Already has sip: prefix - add port 5060 and UDP transport
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s:5060;transport=udp", number);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding port 5060 and UDP transport");
         } else {
-            // Has @domain but missing sip: prefix
-            if (has_transport_param) {
-                snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
-            } else {
-                snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp", number);
-            }
-            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix + transport=udp");
+            // Has @domain but missing sip: prefix - add sip:, port 5060 and UDP transport
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060;transport=udp", number);
+            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix, port 5060 and UDP transport");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp", number);
-        LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination (+transport=udp)");
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+        LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it for credential realm matching
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s;transport=udp", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain + transport=udp for credential realm matching");
+        // Number has no @domain, add it with port 5060 and UDP transport for credential realm matching
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s:5060;transport=udp", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain, port 5060 and UDP transport");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
