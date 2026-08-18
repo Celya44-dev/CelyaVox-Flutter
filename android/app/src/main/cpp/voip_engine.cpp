@@ -777,6 +777,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.proxy_cnt = 0;
     LOGI(">>> nativeRegister: NO PROXY - Direct routing to domain");
 
+    // CRITICAL: Disable DNS SRV lookups (they return TCP which we don't support)
+    // Without this, PJSIP resolves the domain and gets TCP as preferred transport
+    acc_cfg.disable_srv = PJ_TRUE;
+    LOGI(">>> nativeRegister: Disabled DNS SRV lookups (forces direct UDP routing)");
+
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
     // Ensures Digest auth retry works for all modules using account credentials
