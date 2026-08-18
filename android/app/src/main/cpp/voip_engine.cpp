@@ -912,11 +912,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         LOGI("    Transport ID: %d", acc_info.transport_id);
         LOGI("    Has Registration: %d", acc_info.has_registration);
         LOGI("    Online Status: %d", acc_info.online_status);
-        LOGI("    Proxy Count: %d", acc_info.proxy_cnt);
-        for (int i = 0; i < acc_info.proxy_cnt; i++) {
-            LOGI("    Proxy[%d]: %.*s", i, acc_info.proxy[i].slen, acc_info.proxy[i].ptr);
-        }
-        LOGI("    Status Code: %d (%s)", acc_info.status, acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
+        LOGI("    Status Code: %d", acc_info.status);
     }
     
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
