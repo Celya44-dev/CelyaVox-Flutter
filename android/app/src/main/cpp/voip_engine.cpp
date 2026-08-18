@@ -57,9 +57,9 @@ static void emit_event(const char *type, const char *message);
 static void pjsip_log_callback(int level, const char *data, int len) {
     // Log TOUTES les lignes PJSIP (level 3=INFO and above)
     if (data && len > 0 && level >= 3) {  // 3=INFO, 4=WARNING, 5=ERROR, 6=CRITICAL
-        // Formater le log
-        char log_buf[512];  // Increased from 256 to capture longer messages
-        int copy_len = (len < 500) ? len : 500;
+        // Formater le log - BUFFER AGRANDI pour capturer les messages complets
+        char log_buf[2048];  // Increased from 512 to capture full PJSIP messages
+        int copy_len = (len < 2000) ? len : 2000;  // Copy up to 2000 bytes
         strncpy(log_buf, data, copy_len);
         log_buf[copy_len] = '\0';
         
@@ -92,10 +92,10 @@ static void pjsip_log_callback(int level, const char *data, int len) {
             LOGW("=== SIP MSG [ROUTE] *** %s", log_buf);
         } else if (strstr(log_buf, "target") || strstr(log_buf, "Target") || strstr(log_buf, "server") || strstr(log_buf, "Server")) {
             LOGW("=== SIP MSG [TARGET] *** %s", log_buf);
-        } else if (strstr(log_buf, "transport=") || strstr(log_buf, "Transport:") ||
-                   strstr(log_buf, ";udp") || strstr(log_buf, ";tcp") || strstr(log_buf, ";tls") ||
-                   strstr(log_buf, ";sctp") || strstr(log_buf, ";ws") || strstr(log_buf, ";wss")) {
-            LOGW("=== SIP MSG [TRANSPORT] *** %s", log_buf);
+        } else if (strstr(log_buf, "Unsupported") || strstr(log_buf, "unsupported") || 
+                   strstr(log_buf, "EUNSUPTRANSPORT") || strstr(log_buf, "transport")) {
+            // Log TOUS les messages sur les transports avec maximum de détail
+            LOGW("=== SIP MSG [TRANSPORT ISSUE] *** %s", log_buf);
         } else if (strstr(log_buf, "tsx") || strstr(log_buf, "tsxacb") || strstr(log_buf, "transaction")) {
             LOGI("=== SIP MSG [TRANSACTION] %s", log_buf);
         } else if (strstr(log_buf, "Unsupported") || strstr(log_buf, "PJSIP_EUNSUPTRANSPORT") ||
@@ -594,19 +594,33 @@ static bool ensure_endpoint() {
     // Enregistrer le callback personnalisé pour tracer les trames SIP
     LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
     pj_log_set_log_func(&pjsip_log_callback);
+    pj_log_set_level(5);  // Level 5 = maximum debug (TRACE)
+    LOGI(">>> pjsua_init: PJSIP log level set to 5 (TRACE) for detailed debugging");
 
     // Create UDP transport (required by PJSIP, but don't force it on account)
     // Account will connect directly like SUBSCRIBE does
     pjsua_transport_config trans_cfg;
     pjsua_transport_config_default(&trans_cfg);
     trans_cfg.port = 5060;
-    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, nullptr);
+    pjsua_transport_id trans_id = PJSUA_INVALID_ID;
+    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, &trans_id);
     if (status != PJ_SUCCESS) {
         LOGE("UDP transport create failed: %d", status);
         pjsua_destroy();
         return false;
     }
-    LOGI(">>> pjsua_init: UDP transport created (port 5060)");
+    LOGI(">>> pjsua_init: UDP transport created successfully");
+    LOGI(">>> pjsua_init: UDP transport ID=%d, port=5060", trans_id);
+    
+    // Verify transport was registered
+    pjsua_transport_info trans_info;
+    if (pjsua_transport_get_info(trans_id, &trans_info) == PJ_SUCCESS) {
+        LOGI(">>> pjsua_init: Transport info - type=%d, local_addr=%.*s:%d", 
+             trans_info.type, (int)trans_info.local_addr.addr.sa_family, 
+             trans_info.local_name.host.ptr, trans_info.local_name.port);
+    } else {
+        LOGW(">>> pjsua_init: WARNING - Failed to get transport info for ID %d", trans_id);
+    }
 
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
@@ -898,9 +912,16 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
              (strlen(g_global_proxy_with_transport) == 0) ? "YES" : "NO");
         LOGI("    Account URI: %s", g_global_acc_id);
         LOGI("    Reg URI: %s", g_global_acc_reg_uri);
+        LOGI(">>> nativeMakeCall: Account info from PJSIP:");
+        LOGI("    Has proxy: %s", acc_info.proxy_cnt > 0 ? "YES" : "NO");
+        LOGI("    Proxy count: %d", acc_info.proxy_cnt);
+        if (acc_info.proxy_cnt > 0) {
+            LOGI("    Proxy[0]: %.*s", (int)acc_info.proxy[0].slen, acc_info.proxy[0].ptr);
+        }
     }
     
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
+    LOGI(">>> nativeMakeCall: INVITE destination has explicit ;transport=udp (no DNS SRV lookups)");
     LOGI(">>> nativeMakeCall: If 401 Unauthorized received, PJSIP should auto-retry with Digest auth");
     
     // Release JNI string NOW, before taking mutex and calling native APIs
@@ -909,10 +930,17 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
     
-    // PJSIP will now use account g_acc_id credentials (use_shared_auth=PJ_TRUE) because:
-    // 1. Destination now includes domain: "sip:105@domain" (same pattern as SUBSCRIBE)
-    // 2. Account has use_shared_auth=PJ_TRUE (like REGISTER/SUBSCRIBE)
-    // 3. When 401 Unauthorized arrives, PJSIP will match realm and retry with Digest auth
+    // DEBUG: Log all available transports
+    LOGI(">>> nativeMakeCall: Available transports before INVITE:");
+    for (int i = 0; i < PJSUA_MAX_TRANSPORTS; i++) {
+        pjsua_transport_info tinfo;
+        if (pjsua_transport_get_info(i, &tinfo) == PJ_SUCCESS && tinfo.type != PJSIP_TRANSPORT_UNSPECIFIED) {
+            LOGI("    Transport[%d]: type=%d (1=UDP, 2=TCP, 3=TLS), local=%.*s:%d",
+                 i, tinfo.type, (int)tinfo.local_name.host.slen, tinfo.local_name.host.ptr, tinfo.local_name.port);
+        }
+    }
+    
+    LOGI(">>> nativeMakeCall: INVITE destination: %s", g_global_call_dest_uri);
     LOGI(">>> nativeMakeCall: INVITE will use account %d credentials for 401 auth retry (credential realm matching enabled)", g_acc_id);
     
     pjsua_call_id call_id = PJSUA_INVALID_ID;
