@@ -819,28 +819,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Proxy forces PJSIP to route all SIP requests to this server
     memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
     
-    if (proxy && std::string(proxy).length() > 0) {
-        // Use provided proxy with UDP transport forced
-        std::string proxy_str(proxy);
-        if (proxy_str.find("transport=") == std::string::npos) {
-            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                     "%s;transport=udp", proxy);
-        } else {
-            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                     "%s", proxy);
-        }
-    } else {
-        // NO PROXY PROVIDED: Use domain as proxy with UDP transport forced
-        // This forces PJSIP to route via UDP and ignore server-suggested TCP
-        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
-                 "sip:%s;transport=udp", domain);
-        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as proxy: %s", g_global_proxy_with_transport);
-    }
-    
-    // Use PROXY (not outbound_proxy - that doesn't exist in PJSIP 2.17)
-    acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
-    acc_cfg.proxy_cnt = 1;
-    LOGI(">>> nativeRegister: PROXY CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
+    // NOTE: Don't use proxy for now - SUBSCRIBE works without it
+    // PJSIP will connect directly to the domain (like SUBSCRIBE does)
+    acc_cfg.proxy_cnt = 0;
+    LOGI(">>> nativeRegister: NO PROXY CONFIGURED - PJSIP will route directly to domain (like SUBSCRIBE)");
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
@@ -882,9 +864,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - account ID: %d", g_acc_id);
     LOGI("    - status text: %s", acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
     LOGI("    - has credentials (cred_count from cfg): 2");
-    LOGI("    - proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
+    LOGI("    - proxy: NOT CONFIGURED (direct routing like SUBSCRIBE)");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
-    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via proxy with UDP");
+    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route directly to domain");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
