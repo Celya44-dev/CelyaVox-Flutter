@@ -747,11 +747,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
-    // Force UDP transport - CORRECT SYNTAX: ;transport=udp BEFORE :port to prevent DNS SRV lookups
+    // Force UDP transport - RFC 3261 CORRECT SYNTAX: :port;transport=udp
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s;transport=udp:5060", user, domain);
+             "sip:%s@%s:5060;transport=udp", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s;transport=udp:5060", domain);
+             "sip:%s:5060;transport=udp", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -882,22 +882,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix - add ;transport=udp:5060 (transport BEFORE port)
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s;transport=udp:5060", number);
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding ;transport=udp:5060");
+            // Already has sip: prefix - add :5060;transport=udp
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s:5060;transport=udp", number);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding :5060;transport=udp");
         } else {
-            // Has @domain but missing sip: prefix - add sip:, ;transport=udp:5060
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp:5060", number);
-            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix and ;transport=udp:5060");
+            // Has @domain but missing sip: prefix - add sip:, :5060;transport=udp
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060;transport=udp", number);
+            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix and :5060;transport=udp");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it with ;transport=udp:5060 (transport BEFORE port)
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s;transport=udp:5060", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain and ;transport=udp:5060");
+        // Number has no @domain, add it with :5060;transport=udp
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s:5060;transport=udp", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain and :5060;transport=udp");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
@@ -905,13 +905,18 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     // DEBUG: Show account configuration before INVITE
     pjsua_acc_info acc_info;
     if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
-        LOGI(">>> nativeMakeCall: Account Config:");
-        LOGI("    Account ID: %d", g_acc_id);
-        LOGI("    Username: %s", g_global_cred_username);
-        LOGI("    Proxy (from static buffer): %s (empty=%s)", g_global_proxy_with_transport, 
-             (strlen(g_global_proxy_with_transport) == 0) ? "YES" : "NO");
-        LOGI("    Account URI: %s", g_global_acc_id);
-        LOGI("    Reg URI: %s", g_global_acc_reg_uri);
+        LOGI(">>> nativeMakeCall: Account Config (from pjsua_acc_get_info):");
+        LOGI("    Account ID: %d", acc_info.acc_id);
+        LOGI("    Account URI: %.*s", acc_info.uri.slen, acc_info.uri.ptr);
+        LOGI("    Reg URI: %.*s", acc_info.reg_uri.slen, acc_info.reg_uri.ptr);
+        LOGI("    Transport ID: %d", acc_info.transport_id);
+        LOGI("    Has Registration: %d", acc_info.has_registration);
+        LOGI("    Online Status: %d", acc_info.online_status);
+        LOGI("    Proxy Count: %d", acc_info.proxy_cnt);
+        for (int i = 0; i < acc_info.proxy_cnt; i++) {
+            LOGI("    Proxy[%d]: %.*s", i, acc_info.proxy[i].slen, acc_info.proxy[i].ptr);
+        }
+        LOGI("    Status Code: %d (%s)", acc_info.status, acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
     }
     
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
