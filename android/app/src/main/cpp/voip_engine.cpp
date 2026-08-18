@@ -595,6 +595,19 @@ static bool ensure_endpoint() {
     LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
     pj_log_set_log_func(&pjsip_log_callback);
 
+    // Create UDP transport (required by PJSIP, but don't force it on account)
+    // Account will connect directly like SUBSCRIBE does
+    pjsua_transport_config trans_cfg;
+    pjsua_transport_config_default(&trans_cfg);
+    trans_cfg.port = 5060;
+    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, nullptr);
+    if (status != PJ_SUCCESS) {
+        LOGE("UDP transport create failed: %d", status);
+        pjsua_destroy();
+        return false;
+    }
+    LOGI(">>> pjsua_init: UDP transport created (port 5060)");
+
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
         LOGE("pjsua_start failed: %d", status);
