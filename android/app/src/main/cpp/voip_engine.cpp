@@ -924,20 +924,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     std::lock_guard<std::mutex> lock(g_mutex);
     pj_str_t dst = {g_global_call_dest_uri, static_cast<pj_ssize_t>(strlen(g_global_call_dest_uri))};
     
-    // DEBUG: Log all available transports (check up to 16)
-    LOGI(">>> nativeMakeCall: Available transports before INVITE:");
-    for (int i = 0; i < 16; i++) {
-        pjsua_transport_info tinfo;
-        if (pjsua_transport_get_info(i, &tinfo) == PJ_SUCCESS) {
-            const char *type_str = "UNKNOWN";
-            if (tinfo.type == PJSIP_TRANSPORT_UDP) type_str = "UDP";
-            else if (tinfo.type == PJSIP_TRANSPORT_TCP) type_str = "TCP";
-            else if (tinfo.type == PJSIP_TRANSPORT_TLS) type_str = "TLS";
-            LOGI("    Transport[%d]: type=%s, local=%.*s:%d",
-                 i, type_str, (int)tinfo.local_name.host.slen, tinfo.local_name.host.ptr, tinfo.local_name.port);
-        }
-    }
-    
     LOGI(">>> nativeMakeCall: INVITE destination: %s", g_global_call_dest_uri);
     LOGI(">>> nativeMakeCall: INVITE will use account %d credentials for 401 auth retry (credential realm matching enabled)", g_acc_id);
     
