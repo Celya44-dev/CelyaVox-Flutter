@@ -378,85 +378,42 @@ static const char* parse_dialog_state_from_xml(const char* xml_body, int xml_len
 }
 
 // Callback for buddy dialog event (dialog-info+xml events from NOTIFY)
-static void on_buddy_dlg_event_state(pjsua_buddy_id buddy_id, const char *dlg_event, 
-                                      pjsip_rx_data *rdata) {
-    LOGI(">>> on_buddy_dlg_event_state: DIALOG EVENT buddy_id=%d, event=%s", buddy_id, dlg_event);
+// Signature must be: void callback(pjsua_buddy_id buddy_id)
+static void on_buddy_dlg_event_state(pjsua_buddy_id buddy_id) {
+    LOGI(">>> on_buddy_dlg_event_state: Dialog event for buddy_id=%d", buddy_id);
     
-    if (!rdata || !rdata->msg_info.msg) {
-        LOGW(">>> on_buddy_dlg_event_state: No message data");
-        return;
-    }
+    // Get buddy info to check if there's dialog state data available
+    pjsua_buddy_info buddy_info;
+    pjsua_buddy_get_info(buddy_id, &buddy_info);
     
-    pjsip_msg *msg = rdata->msg_info.msg;
-    pjsip_msg_body *body = msg->body;
-    
-    if (!body || !body->data) {
-        LOGW(">>> on_buddy_dlg_event_state: No message body");
-        return;
-    }
-    
-    // Parse the XML body
-    const char *xml_body = (const char *)body->data;
-    int xml_len = body->len;
-    
-    LOGI(">>> on_buddy_dlg_event_state: Parsing XML body, length=%u", (unsigned)xml_len);
-    
-    const char *presence_state = parse_dialog_state_from_xml(xml_body, xml_len);
-    if (!presence_state) {
-        LOGW(">>> on_buddy_dlg_event_state: Failed to parse dialog state");
-        return;
-    }
-    
-    // Extract contact URI from XML
-    const char *uri_start = strstr(xml_body, "uri=\"");
-    if (!uri_start) {
-        LOGW(">>> on_buddy_dlg_event_state: No uri attribute in XML");
-        return;
-    }
-    
-    uri_start += 5;
-    const char *uri_end = strchr(uri_start, '"');
-    if (!uri_end) {
-        LOGW(">>> on_buddy_dlg_event_state: No closing quote for uri");
-        return;
-    }
-    
-    int uri_len = uri_end - uri_start;
-    if (uri_len >= 256) {
-        LOGW(">>> on_buddy_dlg_event_state: URI too long");
-        return;
-    }
-    
-    static char contact_uri[256];
-    strncpy(contact_uri, uri_start, uri_len);
-    contact_uri[uri_len] = '\0';
-    
-    LOGI(">>> on_buddy_dlg_event_state: Parsed state='%s' for contact='%s'", presence_state, contact_uri);
-    
-    // Store in map for later use
+    // Check if we have stored dialog state from NOTIFY
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_buddy_last_dialog_state[buddy_id] = presence_state;
-    
-    // Emit to Dart
-    std::string event_data = contact_uri;
-    event_data += ":";
-    event_data += presence_state;
-    
-    LOGI(">>> on_buddy_dlg_event_state: Emitting presence_updated: %s", event_data.c_str());
-    
-    JNIEnv *env = nullptr;
-    if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
-        jmethodID mid = env->GetMethodID(g_engineClass, "notifyPresenceUpdated", "(Ljava/lang/String;)V");
-        if (mid) {
-            jstring java_event = env->NewStringUTF(event_data.c_str());
-            env->CallVoidMethod(g_engine_instance, mid, java_event);
-            env->DeleteLocalRef(java_event);
-            LOGI(">>> on_buddy_dlg_event_state: Event sent to Dart successfully");
-        } else {
-            LOGW(">>> on_buddy_dlg_event_state: notifyPresenceUpdated method not found");
+    auto state_it = g_buddy_last_dialog_state.find(buddy_id);
+    if (state_it != g_buddy_last_dialog_state.end()) {
+        const char *presence_state = state_it->second.c_str();
+        LOGI(">>> on_buddy_dlg_event_state: Found dialog state '%s' for buddy_id=%d", presence_state, buddy_id);
+        
+        // Find contact URI from our subscription map
+        for (const auto &sub : g_buddy_subscriptions) {
+            if (sub.second == buddy_id) {
+                std::string event_data = sub.first + ":" + presence_state;
+                LOGI(">>> on_buddy_dlg_event_state: Emitting presence_updated: %s", event_data.c_str());
+                
+                JNIEnv *env = nullptr;
+                if (g_vm && g_vm->AttachCurrentThread(&env, nullptr) == 0 && g_engineClass && g_engine_instance) {
+                    jmethodID mid = env->GetMethodID(g_engineClass, "notifyPresenceUpdated", "(Ljava/lang/String;)V");
+                    if (mid) {
+                        jstring java_event = env->NewStringUTF(event_data.c_str());
+                        env->CallVoidMethod(g_engine_instance, mid, java_event);
+                        env->DeleteLocalRef(java_event);
+                        LOGI(">>> on_buddy_dlg_event_state: Event sent to Dart");
+                    }
+                }
+                break;
+            }
         }
     } else {
-        LOGW(">>> on_buddy_dlg_event_state: Cannot attach JNI");
+        LOGI(">>> on_buddy_dlg_event_state: No stored dialog state for buddy_id=%d", buddy_id);
     }
 }
 
@@ -470,7 +427,7 @@ static pjsip_module mod_notify_handler = {
     NULL,                          // start()
     NULL,                          // stop()
     NULL,                          // unload()
-    &notify_rx_request_callback,   // on_rx_request() - Capture incoming NOTIFY requests
+    NULL,                          // on_rx_request() - Not used, using on_buddy_dlg_event_state instead
     NULL,                          // on_rx_response()
     NULL,                          // on_tx_request()
     NULL,                          // on_tx_response()
@@ -819,10 +776,28 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Proxy forces PJSIP to route all SIP requests to this server
     memset(g_global_proxy_with_transport, 0, sizeof(g_global_proxy_with_transport));
     
-    // NOTE: Don't use proxy for now - SUBSCRIBE works without it
-    // PJSIP will connect directly to the domain (like SUBSCRIBE does)
-    acc_cfg.proxy_cnt = 0;
-    LOGI(">>> nativeRegister: NO PROXY CONFIGURED - PJSIP will route directly to domain (like SUBSCRIBE)");
+    if (proxy && std::string(proxy).length() > 0) {
+        // Use provided proxy with UDP transport forced
+        std::string proxy_str(proxy);
+        if (proxy_str.find("transport=") == std::string::npos) {
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s;transport=udp", proxy);
+        } else {
+            snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                     "%s", proxy);
+        }
+    } else {
+        // NO PROXY PROVIDED: Use domain as proxy with UDP transport forced
+        // This forces PJSIP to route via UDP and ignore server-suggested TCP
+        snprintf(g_global_proxy_with_transport, sizeof(g_global_proxy_with_transport) - 1,
+                 "sip:%s;transport=udp", domain);
+        LOGI(">>> nativeRegister: NO PROXY PROVIDED - Using domain as proxy: %s", g_global_proxy_with_transport);
+    }
+    
+    // Use PROXY (not outbound_proxy - that doesn't exist in PJSIP 2.17)
+    acc_cfg.proxy[0] = pj_str_t{g_global_proxy_with_transport, static_cast<pj_ssize_t>(strlen(g_global_proxy_with_transport))};
+    acc_cfg.proxy_cnt = 1;
+    LOGI(">>> nativeRegister: PROXY CONFIGURED with UDP transport forced: %s", g_global_proxy_with_transport);
 
     // PJSIP 2.17: Enable shared authentication session
     // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
@@ -864,9 +839,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - account ID: %d", g_acc_id);
     LOGI("    - status text: %s", acc_info.status_text.ptr ? acc_info.status_text.ptr : "N/A");
     LOGI("    - has credentials (cred_count from cfg): 2");
-    LOGI("    - proxy: NOT CONFIGURED (direct routing like SUBSCRIBE)");
+    LOGI("    - proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
-    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route directly to domain");
+    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via proxy with UDP");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
