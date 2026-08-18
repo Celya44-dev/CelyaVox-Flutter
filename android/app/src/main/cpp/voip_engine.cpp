@@ -21,7 +21,6 @@ static jclass g_engineClass = nullptr;
 static std::mutex g_mutex;
 static bool g_initialized = false;
 static pjsua_acc_id g_acc_id = PJSUA_INVALID_ID;
-static pjsua_transport_id g_transport_id = PJSUA_INVALID_ID;  // UDP transport ID - force account to use UDP only
 static bool g_audio_ready = false;
 static std::string g_account_domain = "";  // Domaine du compte SIP pour construire les URI de buddy
 static std::string g_account_username = "";  // Username du compte SIP (pour auth Digest des SUBSCRIBE)
@@ -595,17 +594,6 @@ static bool ensure_endpoint() {
     // Enregistrer le callback personnalisé pour tracer les trames SIP
     LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
     pj_log_set_log_func(&pjsip_log_callback);
-
-    pjsua_transport_config trans_cfg;
-    pjsua_transport_config_default(&trans_cfg);
-    trans_cfg.port = 5060;
-    status = pjsua_transport_create(PJSIP_TRANSPORT_UDP, &trans_cfg, &g_transport_id);
-    if (status != PJ_SUCCESS) {
-        LOGE("transport create failed: %d", status);
-        pjsua_destroy();
-        return false;
-    }
-    LOGI(">>> pjsua_init: UDP transport created with ID=%d", g_transport_id);
 
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
