@@ -906,13 +906,13 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     pjsua_acc_info acc_info;
     if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
         LOGI(">>> nativeMakeCall: Account Config (from pjsua_acc_get_info):");
-        LOGI("    Account ID: %d", acc_info.acc_id);
-        LOGI("    Account URI: %.*s", acc_info.uri.slen, acc_info.uri.ptr);
-        LOGI("    Reg URI: %.*s", acc_info.reg_uri.slen, acc_info.reg_uri.ptr);
-        LOGI("    Transport ID: %d", acc_info.transport_id);
+        LOGI("    Account ID: %d", acc_info.id);
+        LOGI("    Is Default: %d", acc_info.is_default);
+        LOGI("    Account URI: %.*s", acc_info.acc_uri.slen, acc_info.acc_uri.ptr);
         LOGI("    Has Registration: %d", acc_info.has_registration);
+        LOGI("    Registration Status: %d", acc_info.status);
+        LOGI("    Status Text: %.*s", acc_info.status_text.slen, acc_info.status_text.ptr);
         LOGI("    Online Status: %d", acc_info.online_status);
-        LOGI("    Status Code: %d", acc_info.status);
     }
     
     LOGI(">>> nativeMakeCall: About to send INVITE via account %d to %s", g_acc_id, g_global_call_dest_uri);
