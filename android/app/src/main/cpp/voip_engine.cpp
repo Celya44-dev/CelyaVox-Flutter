@@ -747,11 +747,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
-    // Force port 5060 and UDP transport to prevent DNS SRV lookups that return TCP
+    // Force UDP transport - CORRECT SYNTAX: ;transport=udp BEFORE :port to prevent DNS SRV lookups
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s:5060;transport=udp", user, domain);
+             "sip:%s@%s;transport=udp:5060", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s:5060;transport=udp", domain);
+             "sip:%s;transport=udp:5060", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -882,22 +882,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix - add port 5060 and UDP transport
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s:5060;transport=udp", number);
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding port 5060 and UDP transport");
+            // Already has sip: prefix - add ;transport=udp:5060 (transport BEFORE port)
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s;transport=udp:5060", number);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding ;transport=udp:5060");
         } else {
-            // Has @domain but missing sip: prefix - add sip:, port 5060 and UDP transport
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060;transport=udp", number);
-            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix, port 5060 and UDP transport");
+            // Has @domain but missing sip: prefix - add sip:, ;transport=udp:5060
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s;transport=udp:5060", number);
+            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix and ;transport=udp:5060");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it with port 5060 and UDP transport for credential realm matching
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s:5060;transport=udp", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain, port 5060 and UDP transport");
+        // Number has no @domain, add it with ;transport=udp:5060 (transport BEFORE port)
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s;transport=udp:5060", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain and ;transport=udp:5060");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
