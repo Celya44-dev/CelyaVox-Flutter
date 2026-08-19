@@ -594,8 +594,8 @@ static bool ensure_endpoint() {
     // Enregistrer le callback personnalisé pour tracer les trames SIP
     LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
     pj_log_set_log_func(&pjsip_log_callback);
-    pj_log_set_level(5);  // Level 5 = maximum debug (TRACE)
-    LOGI(">>> pjsua_init: PJSIP log level set to 5 (TRACE) for detailed debugging");
+    pj_log_set_level(6);  // Level 6 = maximum debug (DBG) - highest verbosity
+    LOGI(">>> pjsua_init: PJSIP log level set to 6 (DEBUG) for maximum detailed debugging");
 
     // Create UDP transport (required by PJSIP, but don't force it on account)
     // Account will connect directly like SUBSCRIBE does
@@ -805,7 +805,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI(">>> nativeRegister: VERIFICATION - Account created successfully:");
     LOGI("    - Account ID (g_acc_id)=%d", g_acc_id);
     LOGI("    - Credential count=%d (username=%s, password set)", acc_cfg.cred_count, g_global_cred_username);
-    LOGI("    - use_shared_auth=PJ_TRUE (enables credential sharing across REGISTER/INVITE/SUBSCRIBE)");
+
 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
