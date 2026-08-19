@@ -748,10 +748,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
     // Simple URIs without forced transport (like SUBSCRIBE which works)
+    // TEST: Force IP address 185.222.91.44 instead of domain to test DNS SRV hypothesis
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s", user, domain);
+             "sip:%s@185.222.91.44", user);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s", domain);
+             "sip:185.222.91.44");
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -884,9 +885,9 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain");
+        // Number has no @domain, add it with hardcoded IP for testing
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", number);
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding hardcoded IP 185.222.91.44 for testing");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
