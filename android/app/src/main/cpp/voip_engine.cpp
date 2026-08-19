@@ -661,11 +661,13 @@ static bool ensure_endpoint() {
     pjsua_enum_codecs(nullptr, nullptr);
     
     // Set ALAW to highest priority (255)
-    pjsua_codec_set_priority(pj_str(const_cast<char *>("PCMA/8000")), 255);
+    pj_str_t pcma_codec = pj_str(const_cast<char *>("PCMA/8000"));
+    pjsua_codec_set_priority(&pcma_codec, 255);
     LOGI(">>> CODEC CONFIG: PCMA (ALAW) priority set to 255 (maximum)");
     
     // Set ULAW to very low priority
-    pjsua_codec_set_priority(pj_str(const_cast<char *>("PCMU/8000")), 0);
+    pj_str_t pcmu_codec = pj_str(const_cast<char *>("PCMU/8000"));
+    pjsua_codec_set_priority(&pcmu_codec, 0);
     LOGI(">>> CODEC CONFIG: PCMU (ULAW) priority set to 0 (disabled)");
 
     // Initialize with null audio device to avoid showing microphone indicator at app startup
