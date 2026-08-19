@@ -649,6 +649,25 @@ static bool ensure_endpoint() {
         return false;
     }
 
+    // DISABLE TCP SWITCH: Force PJSIP to keep using UDP even if message is > 1300 bytes
+    // This prevents automatic fallback to TCP when INVITE exceeds UDP size threshold
+    pjsip_cfg()->endpt.disable_tcp_switch = PJ_TRUE;
+    LOGI(">>> TRANSPORT CONFIG: TCP switch DISABLED - PJSIP will use UDP exclusively");
+
+    // FORCE CODEC: Set ALAW as the only codec with highest priority
+    LOGI(">>> CODEC CONFIG: Forcing ALAW codec to reduce INVITE message size");
+    
+    // Disable all codecs first
+    pjsua_enum_codecs(nullptr, nullptr);
+    
+    // Set ALAW to highest priority (255)
+    pjsua_codec_set_priority(pj_str(const_cast<char *>("PCMA/8000")), 255);
+    LOGI(">>> CODEC CONFIG: PCMA (ALAW) priority set to 255 (maximum)");
+    
+    // Set ULAW to very low priority
+    pjsua_codec_set_priority(pj_str(const_cast<char *>("PCMU/8000")), 0);
+    LOGI(">>> CODEC CONFIG: PCMU (ULAW) priority set to 0 (disabled)");
+
     // Initialize with null audio device to avoid showing microphone indicator at app startup
     // Real audio devices will be set later via refreshAudio() when a call is actually made
     pj_status_t null_status = pjsua_set_null_snd_dev();
