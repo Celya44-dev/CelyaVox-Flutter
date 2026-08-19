@@ -572,7 +572,7 @@ static bool ensure_endpoint() {
     // Garder 8 kHz pour éviter l'échec de création de media session.
     media_cfg.clock_rate = 8000;
     media_cfg.snd_clock_rate = 8000;
-    media_cfg.enable_ice = PJ_TRUE;
+    media_cfg.enable_ice = PJ_FALSE;
 
     status = pjsua_init(&ua_cfg, &log_cfg, &media_cfg);
     if (status != PJ_SUCCESS) {
