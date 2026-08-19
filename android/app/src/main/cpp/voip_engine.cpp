@@ -747,11 +747,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_id, 0, sizeof(g_global_acc_id));
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
-    // Force UDP transport - RFC 3261 CORRECT SYNTAX: :port;transport=udp
+    // Simple URIs without forced transport (like SUBSCRIBE which works)
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@%s:5060;transport=udp", user, domain);
+             "sip:%s@%s", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:%s:5060;transport=udp", domain);
+             "sip:%s", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -766,9 +766,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.cred_info[0].realm = pj_str_t{g_global_cred_realm_asterisk, 8};
     acc_cfg.cred_info[0].scheme = pj_str_t{const_cast<char *>("digest"), 6};
     acc_cfg.cred_info[0].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
-    acc_cfg.cred_info[0].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
     acc_cfg.cred_info[0].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
-    acc_cfg.cred_info[0].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
     
     LOGI(">>> nativeRegister: Credential[0] (realm=asterisk, algo=MD5):");
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[0].username.ptr, acc_cfg.cred_info[0].username.ptr);
@@ -778,9 +776,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.cred_info[1].realm = pj_str_t{g_global_cred_realm_wildcard, 1};
     acc_cfg.cred_info[1].scheme = pj_str_t{const_cast<char *>("digest"), 6};
     acc_cfg.cred_info[1].username = pj_str_t{g_global_cred_username, static_cast<pj_ssize_t>(strlen(g_global_cred_username))};
-    acc_cfg.cred_info[1].data_type = PJSIP_CRED_DATA_PLAIN_PASSWD;
     acc_cfg.cred_info[1].data = pj_str_t{g_global_cred_password, static_cast<pj_ssize_t>(strlen(g_global_cred_password))};
-    acc_cfg.cred_info[1].algorithm_type = PJSIP_AUTH_ALGORITHM_MD5;  // PJSIP 2.17: Explicit algorithm
     
     LOGI(">>> nativeRegister: Credential[1] (realm=wildcard, algo=MD5):");
     LOGI("    - username ptr=%p, value=%s", acc_cfg.cred_info[1].username.ptr, acc_cfg.cred_info[1].username.ptr);
@@ -790,12 +786,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // (same as SUBSCRIBE which works: routes directly to sip:number@domain)
     acc_cfg.proxy_cnt = 0;
     LOGI(">>> nativeRegister: NO PROXY - Direct routing to domain");
-
-    // PJSIP 2.17: Enable shared authentication session
-    // This makes credentials available for REGISTER, INVITE, SUBSCRIBE, PUBLISH, IM, etc.
-    // Ensures Digest auth retry works for all modules using account credentials
-    acc_cfg.use_shared_auth = PJ_TRUE;
-    LOGI(">>> nativeRegister: use_shared_auth=PJ_TRUE (PJSIP 2.17: shared auth for all modules)");
 
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
@@ -833,7 +823,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     LOGI("    - has credentials (cred_count from cfg): 2");
     LOGI("    - proxy[0] with transport=udp: %s (forces all SIP requests through UDP)", acc_cfg.proxy_cnt > 0 ? "CONFIGURED" : "NOT CONFIGURED");
     LOGI("    - use_shared_auth: PJ_TRUE (enabled)");
-    LOGI(">>> nativeRegister: All SIP requests (REGISTER/INVITE/SUBSCRIBE) will route via proxy with UDP");
 
     env->ReleaseStringUTFChars(juser, user);
     env->ReleaseStringUTFChars(jpass, pass);
@@ -882,22 +871,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix - add :5060;transport=udp
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s:5060;transport=udp", number);
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, adding :5060;transport=udp");
+            // Already has sip: prefix and @domain - use as is
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s", number);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, using as is");
         } else {
-            // Has @domain but missing sip: prefix - add sip:, :5060;transport=udp
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s:5060;transport=udp", number);
-            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix and :5060;transport=udp");
+            // Has @domain but missing sip: prefix - add sip:
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
+            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it with :5060;transport=udp
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s:5060;transport=udp", number, g_account_domain.c_str());
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain and :5060;transport=udp");
+        // Number has no @domain, add it
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding domain");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
