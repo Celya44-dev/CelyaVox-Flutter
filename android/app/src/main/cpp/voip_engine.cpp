@@ -10,6 +10,7 @@
 #include <pjsip_ua.h>
 #include <pjsua-lib/pjsua.h>
 #include <pjmedia/audiodev.h>
+#include <pjmedia/sdp.h>
 
 #define LOG_TAG "PjsipNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -52,6 +53,31 @@ static void ensure_pj_thread_registered(const char *name) {
 
 // Forward declarations
 static void emit_event(const char *type, const char *message);
+
+// Callback to remove RTCP attributes from SDP to reduce INVITE message size
+static void on_call_sdp_created(pjsua_call_id call_id, pjmedia_sdp_session *sdp,
+                                pj_pool_t *pool, const pjmedia_sdp_session *rem_sdp)
+{
+    PJ_UNUSED_ARG(call_id);
+    PJ_UNUSED_ARG(pool);
+    PJ_UNUSED_ARG(rem_sdp);
+
+    if (!sdp) return;
+
+    pj_str_t STR_RTCP = pj_str((char*)("rtcp"));
+
+    // Parcourir toutes les sections media (audio, video, etc.)
+    for (unsigned i = 0; i < sdp->media_count; ++i) {
+        pjmedia_sdp_media *m = sdp->media[i];
+        
+        // Chercher et supprimer l'attribut "rtcp"
+        pjmedia_sdp_attr *attr = pjmedia_sdp_media_find_attr(m, &STR_RTCP, NULL);
+        if (attr) {
+            pjmedia_sdp_media_remove_attr(m, attr);
+            LOGI(">>> SDP CLEANUP: Removed RTCP attribute from media section %u", i);
+        }
+    }
+}
 
 // Custom PJSIP logger callback pour tracer TOUTES les trames SIP
 static void pjsip_log_callback(int level, const char *data, int len) {
@@ -561,6 +587,7 @@ static bool ensure_endpoint() {
     ua_cfg.cb.on_reg_state = &on_reg_state;
     ua_cfg.cb.on_buddy_state = &on_buddy_state;  // Callback PJSIP natif pour présence
     ua_cfg.cb.on_buddy_dlg_event_state = &on_buddy_dlg_event_state;  // Callback for dialog-info+xml events
+    ua_cfg.cb.on_call_sdp_created = &on_call_sdp_created;  // Callback to clean RTCP attributes from SDP
     static const pj_str_t kUserAgent = pj_str(const_cast<char *>("CelyaVox Mobile"));
     ua_cfg.user_agent = kUserAgent;
 
@@ -580,9 +607,6 @@ static bool ensure_endpoint() {
     media_cfg.clock_rate = 8000;
     media_cfg.snd_clock_rate = 8000;
     media_cfg.enable_ice = PJ_FALSE;
-
-    // --- AJOUT : Désactiver la génération des lignes a=rtcp dans la SDP ---
-    media_cfg.sdp_opt &= ~PJMEDIA_SDP_ADD_RTCP_ATTR;
 
     status = pjsua_init(&ua_cfg, &log_cfg, &media_cfg);
     if (status != PJ_SUCCESS) {
