@@ -581,6 +581,9 @@ static bool ensure_endpoint() {
     media_cfg.snd_clock_rate = 8000;
     media_cfg.enable_ice = PJ_FALSE;
 
+    // --- AJOUT : Désactiver la génération des lignes a=rtcp dans la SDP ---
+    media_cfg.sdp_opt &= ~PJMEDIA_SDP_ADD_RTCP_ATTR;
+
     status = pjsua_init(&ua_cfg, &log_cfg, &media_cfg);
     if (status != PJ_SUCCESS) {
         LOGE("pjsua_init failed: %d", status);
