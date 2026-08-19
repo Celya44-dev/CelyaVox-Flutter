@@ -872,14 +872,21 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     // FIX: Check if number already has @domain (Dart may have added it)
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
+        // Extract the part BEFORE @ to get just the number
+        char *at_sign = strchr(number, '@');
+        int num_len = at_sign - number;
+        char extracted_num[128];
+        strncpy(extracted_num, number, num_len);
+        extracted_num[num_len] = '\0';
+        
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix and @domain - use as is
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "%s", number);
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix and @domain, using as is");
+            // Already has sip: prefix - replace domain with IP
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", extracted_num + 4);
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix, replacing domain with IP 185.222.91.44");
         } else {
-            // Has @domain but missing sip: prefix - add sip:
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
-            LOGI(">>> nativeMakeCall: Number already has @domain, adding sip: prefix");
+            // Has @domain but missing sip: prefix - add sip: and replace domain with IP
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", extracted_num);
+            LOGI(">>> nativeMakeCall: Number has @domain from Dart, replacing domain with IP 185.222.91.44");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
