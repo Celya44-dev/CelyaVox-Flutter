@@ -762,11 +762,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     memset(g_global_acc_reg_uri, 0, sizeof(g_global_acc_reg_uri));
     
     // Simple URIs without forced transport (like SUBSCRIBE which works)
-    // TEST: Force IP address 185.222.91.44 instead of domain to test DNS SRV hypothesis
     snprintf(g_global_acc_id, sizeof(g_global_acc_id) - 1, 
-             "sip:%s@185.222.91.44", user);
+             "sip:%s@%s", user, domain);
     snprintf(g_global_acc_reg_uri, sizeof(g_global_acc_reg_uri) - 1, 
-             "sip:185.222.91.44");
+             "sip:%s", domain);
     
     acc_cfg.id = pj_str_t{g_global_acc_id, static_cast<pj_ssize_t>(strlen(g_global_acc_id))};
     acc_cfg.reg_uri = pj_str_t{g_global_acc_reg_uri, static_cast<pj_ssize_t>(strlen(g_global_acc_reg_uri))};
@@ -825,8 +824,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
     g_account_password = pass;
-    // TEST: Force IP address instead of domain to test DNS SRV hypothesis
-    g_account_domain = "185.222.91.44";
+    g_account_domain = domain;
     
     LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials from static buffers)", user, domain, g_acc_id);
 
@@ -894,22 +892,22 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         extracted_num[num_len] = '\0';
         
         if (strncmp(number, "sip:", 4) == 0) {
-            // Already has sip: prefix - replace domain with IP
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", extracted_num + 4);
-            LOGI(">>> nativeMakeCall: Number already has sip: prefix, replacing domain with IP 185.222.91.44");
+            // Already has sip: prefix - replace domain
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", extracted_num + 4, g_account_domain.c_str());
+            LOGI(">>> nativeMakeCall: Number already has sip: prefix, using domain from account");
         } else {
-            // Has @domain but missing sip: prefix - add sip: and replace domain with IP
-            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", extracted_num);
-            LOGI(">>> nativeMakeCall: Number has @domain from Dart, replacing domain with IP 185.222.91.44");
+            // Has @domain but missing sip: prefix - add sip: and replace domain
+            snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", extracted_num, g_account_domain.c_str());
+            LOGI(">>> nativeMakeCall: Number has @domain from Dart, replacing with account domain");
         }
     } else if (g_account_domain.empty()) {
         // Number has no @domain and domain not available (shouldn't happen)
         snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s", number);
         LOGW(">>> nativeMakeCall: WARNING - domain not available, using number-only destination");
     } else {
-        // Number has no @domain, add it with hardcoded IP for testing
-        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@185.222.91.44", number);
-        LOGI(">>> nativeMakeCall: Number has no @domain, adding hardcoded IP 185.222.91.44 for testing");
+        // Number has no @domain, add it with account domain
+        snprintf(g_global_call_dest_uri, sizeof(g_global_call_dest_uri) - 1, "sip:%s@%s", number, g_account_domain.c_str());
+        LOGI(">>> nativeMakeCall: Number has no @domain, adding account domain");
     }
     
     LOGI(">>> nativeMakeCall: Destination=%s", g_global_call_dest_uri);
