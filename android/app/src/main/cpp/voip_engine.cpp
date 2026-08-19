@@ -57,6 +57,7 @@ static void emit_event(const char *type, const char *message);
 static void pjsip_log_callback(int level, const char *data, int len) {
     // DIAGNOSTIC: Log that callback was invoked at all
     static bool first_call = true;
+    static int msg_count = 0;
     if (first_call) {
         LOGI(">>> CALLBACK INVOKED: pjsip_log_callback called for the FIRST TIME - logging is working!");
         first_call = false;
@@ -64,6 +65,8 @@ static void pjsip_log_callback(int level, const char *data, int len) {
     
     // Log TOUTES les lignes PJSIP (level 0 and above - CAPTURE EVERYTHING)
     if (data && len > 0) {  // CAPTURE ALL LEVELS - no filtering
+        msg_count++;
+        
         // Formater le log - BUFFER AGRANDI pour capturer les messages complets
         char log_buf[2048];  // Increased from 512 to capture full PJSIP messages
         int copy_len = (len < 2000) ? len : 2000;  // Copy up to 2000 bytes
@@ -74,6 +77,9 @@ static void pjsip_log_callback(int level, const char *data, int len) {
         if (copy_len > 0 && log_buf[copy_len-1] == '\n') {
             log_buf[copy_len-1] = '\0';
         }
+        
+        // DEBUG: Log message brut SANS FILTRE - afficher tous les messages
+        LOGI(">>> RAW CALLBACK #%d (level=%d): %s", msg_count, level, log_buf);
         
         // Préfixer avec "SIP TRAME:" pour faciliter les grep
         // Colorer selon le contenu pour mieux identifier les trames importantes
