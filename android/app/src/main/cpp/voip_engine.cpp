@@ -62,8 +62,8 @@ static void pjsip_log_callback(int level, const char *data, int len) {
         first_call = false;
     }
     
-    // Log TOUTES les lignes PJSIP (level 3=INFO and above)
-    if (data && len > 0 && level >= 3) {  // 3=INFO, 4=WARNING, 5=ERROR, 6=CRITICAL
+    // Log TOUTES les lignes PJSIP (level 0 and above - CAPTURE EVERYTHING)
+    if (data && len > 0) {  // CAPTURE ALL LEVELS - no filtering
         // Formater le log - BUFFER AGRANDI pour capturer les messages complets
         char log_buf[2048];  // Increased from 512 to capture full PJSIP messages
         int copy_len = (len < 2000) ? len : 2000;  // Copy up to 2000 bytes
