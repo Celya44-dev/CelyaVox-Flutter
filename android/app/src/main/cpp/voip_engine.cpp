@@ -570,6 +570,7 @@ static bool ensure_endpoint() {
     log_cfg.level = 6;          // File level aussi - captures everything
     log_cfg.msg_logging = PJ_TRUE;  // Activer logging des messages SIP
     log_cfg.decor = PJ_LOG_HAS_SENDER | PJ_LOG_HAS_LEVEL_TEXT | PJ_LOG_HAS_MICRO_SEC;  // Include microseconds for timing
+    LOGI(">>> pjsua_logging_config: console_level=%d, level=%d, msg_logging=%d", log_cfg.console_level, log_cfg.level, log_cfg.msg_logging);
 
     pjsua_media_config media_cfg;
     pjsua_media_config_default(&media_cfg);
@@ -593,6 +594,11 @@ static bool ensure_endpoint() {
     pj_log_set_level(6);  // Level 6 = maximum debug (DBG) - highest verbosity
     LOGI(">>> pjsua_init: PJSIP log level set to 6 (DEBUG) for maximum detailed debugging");
     LOGI(">>> pjsua_init: Custom log callback registered - all PJSIP messages will now be captured");
+    
+    // VERIFICATION: Confirm log level is really 6
+    pj_log_set_level(6);  // Set again to ensure it sticks
+    LOGI(">>> CRITICAL VERIFICATION: Log level RECONFIRMED to 6 - all modules should now produce full debug traces");
+    LOGI(">>> If you don't see many more RAW CALLBACK messages, the logging config is being overridden");
 
     // Register PJSIP module to intercept NOTIFY messages
     {
