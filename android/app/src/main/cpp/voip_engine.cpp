@@ -873,7 +873,7 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
     if (strchr(number, '@') != nullptr) {
         // Number already has domain (e.g., "109@freepbx17-dev.celya.fr")
         // Extract the part BEFORE @ to get just the number
-        char *at_sign = strchr(number, '@');
+        const char *at_sign = strchr(number, '@');
         int num_len = at_sign - number;
         char extracted_num[128];
         strncpy(extracted_num, number, num_len);
@@ -906,10 +906,10 @@ Java_fr_celya_celyavox_PjsipEngine_nativeMakeCall(JNIEnv *env, jobject, jstring 
         LOGI(">>> nativeMakeCall: Account Config (from pjsua_acc_get_info):");
         LOGI("    Account ID: %d", acc_info.id);
         LOGI("    Is Default: %d", acc_info.is_default);
-        LOGI("    Account URI: %.*s", acc_info.acc_uri.slen, acc_info.acc_uri.ptr);
+        LOGI("    Account URI: %.*s", (int)acc_info.acc_uri.slen, acc_info.acc_uri.ptr);
         LOGI("    Has Registration: %d", acc_info.has_registration);
         LOGI("    Registration Status: %d", acc_info.status);
-        LOGI("    Status Text: %.*s", acc_info.status_text.slen, acc_info.status_text.ptr);
+        LOGI("    Status Text: %.*s", (int)acc_info.status_text.slen, acc_info.status_text.ptr);
         LOGI("    Online Status: %d", acc_info.online_status);
     }
     
