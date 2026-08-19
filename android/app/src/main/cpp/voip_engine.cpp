@@ -539,6 +539,13 @@ static bool ensure_endpoint() {
         LOGE("pjsua_create failed");
         return false;
     }
+    
+    // CRITICAL: Enable custom logging BEFORE pjsua_init() to capture ALL initialization logs
+    LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback BEFORE init");
+    pj_log_set_log_func(&pjsip_log_callback);
+    pj_log_set_level(6);  // Level 6 = maximum debug (DBG) - highest verbosity
+    LOGI(">>> pjsua_create: PJSIP log level set to 6 (DEBUG) for maximum detailed debugging");
+    LOGI(">>> pjsua_create: Custom log callback registered - ALL initialization logs will be captured");
 
     pjsua_config ua_cfg;
     pjsua_config_default(&ua_cfg);
@@ -591,11 +598,8 @@ static bool ensure_endpoint() {
         }
     }
 
-    // Enregistrer le callback personnalisé pour tracer les trames SIP
-    LOGI("=== SIP TRACING ENABLED: Registering custom PJSIP logger callback");
-    pj_log_set_log_func(&pjsip_log_callback);
-    pj_log_set_level(6);  // Level 6 = maximum debug (DBG) - highest verbosity
-    LOGI(">>> pjsua_init: PJSIP log level set to 6 (DEBUG) for maximum detailed debugging");
+    // Enregistrer le callback personnalisé pour tracer les trames SIP - NOW DONE BEFORE init
+    // REMOVED: pj_log_set_log_func and pj_log_set_level now called earlier (after pjsua_create)
 
     // Create UDP transport (required by PJSIP, but don't force it on account)
     // Account will connect directly like SUBSCRIBE does
