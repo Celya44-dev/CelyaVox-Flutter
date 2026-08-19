@@ -811,7 +811,8 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     // Sauvegarder les credentials du compte pour les SUBSCRIBE (auth Digest)
     g_account_username = user;
     g_account_password = pass;
-    g_account_domain = domain;
+    // TEST: Force IP address instead of domain to test DNS SRV hypothesis
+    g_account_domain = "185.222.91.44";
     
     LOGI(">>> nativeRegister: Account registered! username=%s, domain=%s, g_acc_id=%d (credentials from static buffers)", user, domain, g_acc_id);
 
