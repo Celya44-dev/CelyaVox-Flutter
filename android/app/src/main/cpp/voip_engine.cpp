@@ -865,6 +865,11 @@ Java_fr_celya_celyavox_PjsipEngine_nativeRegister(JNIEnv *env, jobject, jstring 
     acc_cfg.proxy_cnt = 0;
     LOGI(">>> nativeRegister: NO PROXY - Direct routing to domain");
 
+    // CRITICAL: Enable shared auth for buddies (SUBSCRIBE/NOTIFY) to use account credentials
+    // This allows SUBSCRIBE to automatically retry with Digest auth after receiving 401
+    acc_cfg.use_shared_auth = PJ_TRUE;
+    LOGI(">>> nativeRegister: SHARED AUTH ENABLED - buddies will use account credentials for 401 retries");
+
     pj_status_t status = pjsua_acc_add(&acc_cfg, PJ_TRUE, &g_acc_id);
     
     // DEBUG: Vérifier que g_acc_id est correctement set par pjsua_acc_add
