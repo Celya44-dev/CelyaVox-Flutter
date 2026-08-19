@@ -65,11 +65,22 @@ static void on_call_sdp_created(pjsua_call_id call_id, pjmedia_sdp_session *sdp,
     if (!sdp) return;
 
     pj_str_t STR_RTCP = pj_str((char*)("rtcp"));
+    pj_str_t STR_TEXT = pj_str((char*)"text");
 
     // Parcourir toutes les sections media (audio, video, etc.)
     for (unsigned i = 0; i < sdp->media_count; ++i) {
         pjmedia_sdp_media *m = sdp->media[i];
         
+        // Si c'est le flux m=text, on le retire complètement
+        if (pj_stricmp(&m->desc.media, &STR_TEXT) == 0) {
+            // Décale le tableau de médias vers la gauche
+            for (unsigned j = i; j < sdp->media_count - 1; ++j) {
+                sdp->media[j] = sdp->media[j + 1];
+            }
+            sdp->media_count--;
+            continue; // On ne traite pas cet élément supprimé
+        }
+
         // Chercher et supprimer l'attribut "rtcp"
         pjmedia_sdp_attr *attr = pjmedia_sdp_media_find_attr(m, &STR_RTCP, NULL);
         if (attr) {
