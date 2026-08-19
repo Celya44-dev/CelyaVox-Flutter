@@ -34,7 +34,7 @@
 
 /* Optimize for mobile VoIP */
 #define PJ_ENABLE_EXTRA_CHECK             0
-#define PJ_LOG_MAX_LEVEL                  3
+#define PJ_LOG_MAX_LEVEL                  6
 #define PJMEDIA_ECHO_SUPPRESSOR           0
 #define PJMEDIA_ECHO_USE_SIMPLE_FILTER    0
 
