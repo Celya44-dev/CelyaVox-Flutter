@@ -55,6 +55,13 @@ static void emit_event(const char *type, const char *message);
 
 // Custom PJSIP logger callback pour tracer TOUTES les trames SIP
 static void pjsip_log_callback(int level, const char *data, int len) {
+    // DIAGNOSTIC: Log that callback was invoked at all
+    static bool first_call = true;
+    if (first_call) {
+        LOGI(">>> CALLBACK INVOKED: pjsip_log_callback called for the FIRST TIME - logging is working!");
+        first_call = false;
+    }
+    
     // Log TOUTES les lignes PJSIP (level 3=INFO and above)
     if (data && len > 0 && level >= 3) {  // 3=INFO, 4=WARNING, 5=ERROR, 6=CRITICAL
         // Formater le log - BUFFER AGRANDI pour capturer les messages complets
