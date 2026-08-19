@@ -649,11 +649,6 @@ static bool ensure_endpoint() {
         return false;
     }
 
-    // DISABLE TCP SWITCH: Force PJSIP to keep using UDP even if message is > 1300 bytes
-    // This prevents automatic fallback to TCP when INVITE exceeds UDP size threshold
-    pjsip_cfg()->endpt.disable_tcp_switch = PJ_TRUE;
-    LOGI(">>> TRANSPORT CONFIG: TCP switch DISABLED - PJSIP will use UDP exclusively");
-
     // FORCE CODEC: Set ALAW as the only codec with highest priority
     LOGI(">>> CODEC CONFIG: Forcing ALAW codec to reduce INVITE message size");
     

@@ -35,6 +35,7 @@
 /* Optimize for mobile VoIP */
 #define PJ_ENABLE_EXTRA_CHECK             0
 #define PJ_LOG_MAX_LEVEL                  5
+#define PJSIP_UDP_SIZE_THRESHOLD          4000
 #define PJMEDIA_ECHO_SUPPRESSOR           0
 #define PJMEDIA_ECHO_USE_SIMPLE_FILTER    0
 
