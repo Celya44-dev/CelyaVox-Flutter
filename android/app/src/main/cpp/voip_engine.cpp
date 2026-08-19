@@ -1244,15 +1244,54 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     buddy_cfg.subscribe_dlg_event = PJ_TRUE;    // Activer BLF (dialog event subscription)
     // Note: buddy_cb doesn't exist in pjsua_buddy_config - NOTIFY messages handled by notify_msg_callback module
     
+    // DEBUG: Vérifier que g_acc_id a bien les credentials AVANT d'assigner au buddy
+    LOGI(">>> nativeSubscribePresence: CREDENTIAL VERIFICATION BEFORE BUDDY SETUP:");
+    LOGI("    - g_acc_id=%d (should be >= 0)", g_acc_id);
+    LOGI("    - g_global_cred_username=%s (should not be empty)", g_global_cred_username);
+    LOGI("    - g_global_cred_password=%s (should not be empty)", g_global_cred_password);
+    
+    if (g_acc_id < 0) {
+        LOGE(">>> nativeSubscribePresence: CRITICAL ERROR - g_acc_id is INVALID (%d)! Cannot assign to buddy", g_acc_id);
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_FALSE;
+    }
+    
+    if (strlen(g_global_cred_username) == 0 || strlen(g_global_cred_password) == 0) {
+        LOGE(">>> nativeSubscribePresence: CRITICAL ERROR - Account credentials are EMPTY!");
+        LOGE("    - username length=%zu", strlen(g_global_cred_username));
+        LOGE("    - password length=%zu", strlen(g_global_cred_password));
+        env->ReleaseStringUTFChars(jcontact, contact_str);
+        env->ReleaseStringUTFChars(jprefix, prefix_str);
+        return JNI_FALSE;
+    }
+    
+    // Vérifier que le compte par défaut est bien g_acc_id
+    pjsua_acc_id default_acc = pjsua_acc_get_default();
+    LOGI(">>> nativeSubscribePresence: Default account=%d, buddy will use account=%d", default_acc, g_acc_id);
+    
+    // Vérifier que le compte a bien les credentials
+    pjsua_acc_info acc_info;
+    if (pjsua_acc_get_info(g_acc_id, &acc_info) == PJ_SUCCESS) {
+        LOGI(">>> nativeSubscribePresence: Account info for acc_id=%d:", g_acc_id);
+        LOGI("    - has_registration=%d", acc_info.has_registration);
+        LOGI("    - status=%d", acc_info.status);
+        if (acc_info.status_text.ptr) {
+            LOGI("    - status_text=%s", acc_info.status_text.ptr);
+        }
+    } else {
+        LOGE(">>> nativeSubscribePresence: ERROR - pjsua_acc_get_info failed for acc_id=%d", g_acc_id);
+    }
+    
     buddy_cfg.acc_id = g_acc_id;                // Lier le buddy au compte pour réutiliser ses credentials
     // Le buddy utilisera les credentials du compte g_acc_id pour authentifier le SUBSCRIBE après 401
+    LOGI(">>> nativeSubscribePresence: buddy_cfg.acc_id assigned to %d", buddy_cfg.acc_id);
     
     LOGI(">>> nativeSubscribePresence: buddy_cfg parameters:");
-    char config_summary[512];
-    pj_ansi_snprintf(config_summary, sizeof(config_summary), 
-        "buddy_cfg SUMMARY: uri=%s, subscribe=%d, subscribe_dlg_event=%d, acc_id=%d, username=%s",
-        buddy_uri_buf, buddy_cfg.subscribe, buddy_cfg.subscribe_dlg_event, buddy_cfg.acc_id, g_account_username.c_str());
-    LOGI(">>> nativeSubscribePresence: %s", config_summary);
+    LOGI("    - uri=%s", buddy_uri_buf);
+    LOGI("    - subscribe=%d (presence, disabled)", buddy_cfg.subscribe);
+    LOGI("    - subscribe_dlg_event=%d (BLF, enabled)", buddy_cfg.subscribe_dlg_event);
+    LOGI("    - acc_id=%d (will use account credentials)", buddy_cfg.acc_id);
     
     // Ajouter le buddy (PJSIP envoie automatiquement SUBSCRIBE SIP au serveur)
     LOGI(">>> nativeSubscribePresence: Calling pjsua_buddy_add()...");
