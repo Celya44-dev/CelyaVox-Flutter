@@ -1267,7 +1267,6 @@ Java_fr_celya_celyavox_PjsipEngine_nativeSubscribePresence(JNIEnv *env, jobject,
     }
     
     // Vérifier que le compte par défaut est bien g_acc_id
-    pjsua_acc_id default_acc = pjsua_acc_get_default();
     LOGI(">>> nativeSubscribePresence: Default account=%d, buddy will use account=%d", default_acc, g_acc_id);
     
     // Vérifier que le compte a bien les credentials
