@@ -1,6 +1,6 @@
 name: celyavox_flutter
 description: Placeholder Flutter VoIP app.
-version: 1.0.2
+version: 0.3.0
 publish_to: 'none'
 
 environment:
