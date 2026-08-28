@@ -25,7 +25,7 @@ android {
         applicationId "fr.celya.celyavox"
         minSdk 21
         targetSdk 36
-        versionCode 2
+        versionCode 3
         versionName "0.3.0"
         // Limit native ABIs to those we ship libs for (arm only); avoids x86/x86_64 crashes.
         ndk {
