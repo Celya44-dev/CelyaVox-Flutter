@@ -25,8 +25,8 @@ android {
         applicationId "fr.celya.celyavox"
         minSdk 21
         targetSdk 36
-        versionCode flutter.versionCode
-        versionName flutter.versionName
+        versionCode 2
+        versionName "0.3.0"
         // Limit native ABIs to those we ship libs for (arm only); avoids x86/x86_64 crashes.
         ndk {
             abiFilters "arm64-v8a"
